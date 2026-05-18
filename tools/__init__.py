@@ -219,11 +219,47 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
         ToolSpec(
             name="notion_status",
             description=(
-                "Show whether Notion is connected and which database is "
-                "configured. Use first if other notion_* calls fail, or "
-                "when the user asks 'connected to notion?' / '绑了 notion 吗'."
+                "Show Notion connection status. If only NOTION_API_KEY is "
+                "set, this also auto-discovers the database: silently picks "
+                "the only accessible one, or returns the list with "
+                "`needs_user_choice: true` if there are multiple. Call this "
+                "first whenever the user wants to 'connect Notion' / '绑定 "
+                "notion' / '看看 notion 状态'."
             ),
             parameters={"type": "object", "properties": {}},
+        ),
+    ),
+    "notion_databases": (
+        notion_tool.notion_databases,
+        ToolSpec(
+            name="notion_databases",
+            description=(
+                "List every Notion database the integration can access. "
+                "Read-only. Useful when the user has multiple databases "
+                "shared with DeckMind and wants to switch which one is "
+                "active."
+            ),
+            parameters={"type": "object", "properties": {}},
+        ),
+    ),
+    "notion_set_default_database": (
+        notion_tool.notion_set_default_database,
+        ToolSpec(
+            name="notion_set_default_database",
+            description=(
+                "Persist a Notion database ID as the active default "
+                "(saved to ~/.deckmind/notion.json). Use this after "
+                "notion_status returns `needs_user_choice: true`, or when "
+                "the user asks to switch to a different shared database."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "database_id": {"type": "string",
+                                    "description": "The 32-char hex ID of the database"},
+                },
+                "required": ["database_id"],
+            },
         ),
     ),
     "notion_log_session": (

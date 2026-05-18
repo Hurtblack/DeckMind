@@ -1,12 +1,17 @@
 """Notion logbook tools — write game-session records into a Notion database.
 
-Configuration via environment variables (set them in ~/.bashrc on the Deck):
-  NOTION_API_KEY      — required. Internal integration token (ntn_xxx).
-  NOTION_DATABASE_ID  — required. 32-char ID of the database to log into.
+Configuration:
+  NOTION_API_KEY       — required env var. Internal integration token (ntn_xxx).
+  NOTION_DATABASE_ID   — optional env var. Forces use of a specific database.
+                         When unset, the agent auto-discovers via the Notion
+                         search API and persists its choice to
+                         ~/.deckmind/notion.json — so you only need the token.
 
-You do NOT need to touch this file when you set those up. The code is
-already shipped; setting the env vars and restarting the agent is all
-that's needed.
+Auto-discovery logic (in notion_status):
+  - 0 accessible databases  → tell user to share one with DeckMind.
+  - 1 accessible database   → silently auto-pick + persist + use it.
+  - 2+ accessible databases → list them, ask user to pick one via
+                              notion_set_default_database.
 
 Schema convention (by FIELD TYPE, not name — works with any layout):
   - Title          → game name
@@ -18,10 +23,17 @@ Schema convention (by FIELD TYPE, not name — works with any layout):
 from __future__ import annotations
 
 import datetime
+import json
 import os
+import pathlib
 from typing import Any
 
 import httpx  # bundled via the openai SDK; no extra install needed
+
+
+# Persisted default database — lives next to the user profile.
+_CONFIG_DIR = pathlib.Path.home() / ".deckmind"
+_CONFIG_FILE = _CONFIG_DIR / "notion.json"
 
 
 NOTION_VERSION = "2022-06-28"
@@ -35,9 +47,29 @@ def _key() -> str | None:
     return v if v else None
 
 
+def _load_config() -> dict[str, Any]:
+    """Read the persisted Notion config. Empty dict on any failure."""
+    try:
+        return json.loads(_CONFIG_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_config(data: dict[str, Any]) -> None:
+    """Persist the Notion config (creates ~/.deckmind/ if missing)."""
+    _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    _CONFIG_FILE.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 def _db() -> str | None:
+    """Resolve the active database ID. Precedence: env var > persisted default."""
     v = os.environ.get("NOTION_DATABASE_ID")
-    return v if v else None
+    if v:
+        return v
+    return _load_config().get("default_database_id") or None
 
 
 def _headers() -> dict[str, str]:
@@ -120,35 +152,90 @@ def _flatten_page(page: dict[str, Any]) -> dict[str, Any]:
 # ---------- public tools ----------
 
 _SETUP_HINT = (
-    "在 Deck 的终端里运行（一次性，写入 ~/.bashrc）：\n"
-    "  echo 'export NOTION_API_KEY=ntn_你的token' >> ~/.bashrc\n"
-    "  echo 'export NOTION_DATABASE_ID=你的数据库id' >> ~/.bashrc\n"
+    "在 Deck 上用 nano 把 token 写入 ~/.bashrc（不要发到任何聊天里）：\n"
+    "  nano ~/.bashrc\n"
+    "  # 在文件底加这一行：\n"
+    "  export NOTION_API_KEY=ntn_你的token\n"
+    "  # Ctrl+O 保存, Ctrl+X 退出\n"
     "  source ~/.bashrc\n"
-    "数据库 ID 是 URL 里那串 32 位 hex。\n"
-    "别忘了把数据库分享给 DeckMind integration（数据库页右上角 ⋯ → Connections → DeckMind）。"
+    "然后在 Notion 里把要用的数据库分享给 DeckMind integration（数据库右上角 ⋯ → Connections → DeckMind）。\n"
+    "之后重启 deckmind，数据库会被自动发现 —— database_id 不用手动设了。"
 )
 
 
+async def _list_databases() -> tuple[list[dict[str, str]] | None, dict[str, Any] | None]:
+    """Query Notion's search API for every database this token can see."""
+    data, err = await _request("POST", "/search", json={
+        "filter": {"value": "database", "property": "object"},
+        "page_size": 100,
+    })
+    if err:
+        return None, err
+    dbs = []
+    for d in data.get("results", []):
+        title = "".join(t.get("plain_text", "") for t in d.get("title", []))
+        dbs.append({"id": d["id"], "title": title or "(untitled)"})
+    return dbs, None
+
+
 async def notion_status() -> dict[str, Any]:
-    """Show Notion connection status, database info, and detected field mapping."""
+    """Show Notion connection + database. Auto-discovers a database when only
+    NOTION_API_KEY is set: 0 found → asks user to share one; 1 found → silently
+    adopts; 2+ found → lists them for the user to pick."""
     if not _key():
         return {"ok": False, "connected": False, "missing": "NOTION_API_KEY",
                 "hint": _SETUP_HINT}
-    if not _db():
-        return {"ok": False, "connected": False, "missing": "NOTION_DATABASE_ID",
-                "hint": _SETUP_HINT}
 
-    s = await _schema(_db())
+    db = _db()
+
+    # Auto-discovery path: no database configured anywhere yet.
+    if not db:
+        dbs, err = await _list_databases()
+        if err:
+            return {"ok": False, "connected": True, **err,
+                    "hint": "Token 可能无效，或网络不通。"}
+        if not dbs:
+            return {
+                "ok": False, "connected": True, "databases_found": 0,
+                "hint": ("Token 工作正常，但还没有任何数据库分享给 DeckMind "
+                         "integration。在 Notion 里打开你想用的数据库 → 右上角 "
+                         "⋯ → Connections → 搜索 DeckMind 加进去，然后再问我一次。"),
+            }
+        if len(dbs) == 1:
+            # Silent auto-pick — persist + use immediately.
+            chosen = dbs[0]
+            _save_config({
+                "default_database_id": chosen["id"],
+                "default_database_title": chosen["title"],
+                "set_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                "source": "auto_discovered",
+            })
+            db = chosen["id"]
+        else:
+            return {
+                "ok": True, "connected": True,
+                "needs_user_choice": True,
+                "databases": dbs,
+                "message": (f"找到 {len(dbs)} 个可访问的数据库。请用 "
+                            "notion_set_default_database(database_id=...) 指定一个，"
+                            "或者在 ~/.bashrc 里强制 export NOTION_DATABASE_ID=..."),
+            }
+
+    s = await _schema(db)
     if not s:
         return {"ok": False, "connected": True,
-                "error": "could not read the database",
-                "hint": "请确认 DATABASE_ID 正确，并且已把这个数据库分享给 "
-                        "DeckMind integration（数据库右上角 ⋯ → Connections → DeckMind）。"}
+                "error": "could not read the database schema",
+                "hint": "请确认数据库已分享给 DeckMind integration（数据库右上角 ⋯ → Connections → DeckMind）。"}
+
+    cfg = _load_config()
+    source = ("env var (NOTION_DATABASE_ID)" if os.environ.get("NOTION_DATABASE_ID")
+              else cfg.get("source", "persisted in ~/.deckmind/notion.json"))
 
     return {
         "ok": True, "connected": True,
         "database_title": s["title_text"],
-        "database_id_short": _db()[:8] + "...",
+        "database_id_short": db[:8] + "...",
+        "database_id_source": source,
         "properties": s["_props"],
         "field_mapping": {
             "game (title)": s["title"],
@@ -156,6 +243,52 @@ async def notion_status() -> dict[str, Any]:
             "date": s["date"],
             "notes (rich_text)": s["rich_text"],
         },
+    }
+
+
+async def notion_databases() -> dict[str, Any]:
+    """List every database this integration can access (read-only)."""
+    if not _key():
+        return {"ok": False, "error": "NOTION_API_KEY not set", "hint": _SETUP_HINT}
+    dbs, err = await _list_databases()
+    if err:
+        return err
+    return {
+        "ok": True, "count": len(dbs or []),
+        "databases": dbs or [],
+        "current_default": _db(),
+        "hint": (None if dbs else
+                 "没找到任何能访问的数据库。在 Notion 里把数据库分享给 "
+                 "DeckMind integration（⋯ → Connections → DeckMind）。"),
+    }
+
+
+async def notion_set_default_database(database_id: str) -> dict[str, Any]:
+    """Persist `database_id` as the default for all future notion_* calls."""
+    if not _key():
+        return {"ok": False, "error": "NOTION_API_KEY not set", "hint": _SETUP_HINT}
+
+    # Verify accessibility before saving — better to fail loudly than to
+    # save a bad ID and confuse the user on the next call.
+    data, err = await _request("GET", f"/databases/{database_id}")
+    if err:
+        return {"ok": False, **err,
+                "hint": "确认 database_id 正确且已分享给 DeckMind integration。"}
+
+    title = "".join(t.get("plain_text", "") for t in data.get("title", []))
+    _save_config({
+        "default_database_id": database_id,
+        "default_database_title": title or "(untitled)",
+        "set_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "source": "user_chosen",
+    })
+    # Invalidate cached schema so the next call re-reads this DB.
+    _schema_cache.pop(database_id, None)
+    return {
+        "ok": True, "set_as_default": True,
+        "database_id": database_id,
+        "database_title": title or "(untitled)",
+        "saved_to": str(_CONFIG_FILE),
     }
 
 

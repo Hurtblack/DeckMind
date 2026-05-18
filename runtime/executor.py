@@ -41,8 +41,11 @@ RISK_SAFE: set[str] = {
     "remember",
     "forget",
     "list_profile",
-    # Notion reads — pure queries, no writes.
+    # Notion reads — pure queries, no remote writes. (notion_status and
+    # notion_set_default_database touch ~/.deckmind/notion.json only.)
     "notion_status",
+    "notion_databases",
+    "notion_set_default_database",
     "notion_recent",
     "notion_total",
 }
