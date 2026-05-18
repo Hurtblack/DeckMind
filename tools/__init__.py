@@ -14,7 +14,10 @@ from typing import Any, Awaitable, Callable
 
 from llm import ToolSpec
 
-from . import macro_tool, package_tool, steam_tool, system_tool, update_tool
+from . import (
+    macro_tool, package_tool, profile_tool,
+    steam_tool, system_tool, update_tool,
+)
 
 
 # Every tool is an async callable returning a dict.
@@ -159,6 +162,55 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
         ToolSpec(
             name="disk_usage",
             description="Show human-readable disk usage for / and /home.",
+            parameters={"type": "object", "properties": {}},
+        ),
+    ),
+    "remember": (
+        profile_tool.remember,
+        ToolSpec(
+            name="remember",
+            description=(
+                "Save a fact about the user that should persist across "
+                "sessions (name, preferences, schedule, gaming style, etc.). "
+                "Use a short snake_case key. Overwrites any prior value at "
+                "the same key. Examples: "
+                "remember('name','赖天宇'); "
+                "remember('favorite_genre','soulslike'); "
+                "remember('play_window','weekends 1-2h')."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string"},
+                    "value": {"type": "string"},
+                },
+                "required": ["key", "value"],
+            },
+        ),
+    ),
+    "forget": (
+        profile_tool.forget,
+        ToolSpec(
+            name="forget",
+            description="Remove a previously saved fact by key.",
+            parameters={
+                "type": "object",
+                "properties": {"key": {"type": "string"}},
+                "required": ["key"],
+            },
+        ),
+    ),
+    "list_profile": (
+        profile_tool.list_profile,
+        ToolSpec(
+            name="list_profile",
+            description=(
+                "Return every fact currently stored about the user. "
+                "Usually you don't need to call this — the profile is "
+                "already injected into your system prompt at startup. "
+                "Use it only when the user asks 'what do you know about me?' "
+                "and you want to confirm against the latest on-disk state."
+            ),
             parameters={"type": "object", "properties": {}},
         ),
     ),

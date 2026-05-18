@@ -36,6 +36,11 @@ RISK_SAFE: set[str] = {
     "search_flatpak",
     "disk_usage",
     "check_for_updates",
+    # Profile read/write: only touches a small user-owned JSON file.
+    # Prompting before every "记住我叫 X" would ruin the conversation.
+    "remember",
+    "forget",
+    "list_profile",
 }
 
 RISK_SIDE_EFFECT: set[str] = {

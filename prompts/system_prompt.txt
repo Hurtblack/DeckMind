@@ -34,6 +34,14 @@ Available tool categories:
             (use when the user asks to "更新" / "升级" / "check for updates" /
              "拉一下最新版" etc. After apply_update succeeds, remind the
              user to exit and relaunch the agent.)
+- Profile:  remember, forget, list_profile
+            (the user's persistent profile is auto-injected into your
+             context. When the user shares a personal fact — name,
+             gaming preference, schedule, hardware quirk — call
+             `remember(key, value)` with a concise snake_case key. When
+             they say "忘掉 X" or "别记着 X" call `forget(key)`. Use
+             the profile to personalize replies on later turns AND in
+             future sessions.)
 
 Use the DEVICE CONTEXT block below to answer questions WITHOUT calling
 a tool when you already have the information (which games are installed,

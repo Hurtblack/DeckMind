@@ -124,6 +124,10 @@ async def gather_context() -> dict[str, Any]:
     # Steam library.
     ctx["steam_games"] = scan_steam_library()
 
+    # User profile (cross-session memory).
+    from .profile import load_profile
+    ctx["user_profile"] = load_profile()
+
     # Flatpak apps (Steam Deck users install most extra software this way).
     if shutil.which("flatpak"):
         rc, out = await _run(
@@ -142,6 +146,14 @@ async def gather_context() -> dict[str, Any]:
 
 def format_context_for_prompt(ctx: dict[str, Any]) -> str:
     """Render the context dict as a section to append to the system prompt."""
+    sections: list[str] = []
+
+    # Profile section first — most important for personalization.
+    from .profile import format_profile_for_prompt
+    profile_block = format_profile_for_prompt(ctx.get("user_profile") or {})
+    if profile_block:
+        sections.append(profile_block)
+
     lines: list[str] = ["=== DEVICE CONTEXT (auto-collected at startup) ==="]
 
     if "hostname" in ctx:
@@ -182,4 +194,6 @@ def format_context_for_prompt(ctx: dict[str, Any]) -> str:
                  "WITHOUT calling tools when you can. Call tools only "
                  "when you need to ACT or fetch a fresher value.")
     lines.append("=== END CONTEXT ===")
-    return "\n".join(lines)
+    sections.append("\n".join(lines))
+
+    return "\n\n".join(sections)
