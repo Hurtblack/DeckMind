@@ -102,6 +102,28 @@ class CommandToolValidationTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertIn("allowlisted command not found", result.reason or "")
 
+    def test_rejects_executable_resolved_outside_trusted_dirs(self) -> None:
+        from unittest.mock import patch
+
+        module = load_command_tool()
+
+        with patch("shutil.which", return_value="/tmp/evil-curl"):
+            result = module.validate_command(["curl", "-I", "https://example.com"])
+
+        self.assertFalse(result.ok)
+        self.assertIn("resolved outside trusted executable directories", result.reason or "")
+
+    def test_rejects_home_executable_even_when_allowlisted_name_matches(self) -> None:
+        from unittest.mock import patch
+
+        module = load_command_tool()
+
+        with patch("shutil.which", return_value=str(Path.home() / "bin" / "curl")):
+            result = module.validate_command(["curl", "-I", "https://example.com"])
+
+        self.assertFalse(result.ok)
+        self.assertIn("resolved outside trusted executable directories", result.reason or "")
+
     def test_rejects_writes_outside_allowed_dirs(self) -> None:
         result = validate_command([
             "curl",

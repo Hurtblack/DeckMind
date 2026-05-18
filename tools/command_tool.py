@@ -75,7 +75,13 @@ _SHELL_META_TOKENS: tuple[str, ...] = (
 
 _SIMPLE_COMMAND_RE = re.compile(r"^[A-Za-z0-9._+-]+$")
 _SYSTEMD_UNIT_RE = re.compile(r"^[A-Za-z0-9_.@-]+\.service$")
-_TRUSTED_PATH = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
+_TRUSTED_EXECUTABLE_DIRS: tuple[str, ...] = (
+    "/usr/bin",
+    "/bin",
+    "/usr/local/bin",
+    "/opt/homebrew/bin",
+)
+_TRUSTED_PATH = ":".join(_TRUSTED_EXECUTABLE_DIRS)
 
 
 def _reject(argv: list[str], reason: str, command: str | None = None) -> ValidationResult:
@@ -117,12 +123,9 @@ def _resolve_executable(command: str) -> tuple[str | None, str | None]:
         return None, f"allowlisted command not found in trusted path: {command}"
 
     resolved = Path(executable).resolve(strict=False)
-    home = Path.home().resolve(strict=False)
-    cwd = Path.cwd().resolve(strict=False)
-    if _is_under(resolved, home) or resolved == home:
-        return None, f"allowlisted command not found in trusted path: {command}"
-    if _is_under(resolved, cwd) or resolved == cwd:
-        return None, f"allowlisted command not found in trusted path: {command}"
+    trusted_dirs = tuple(Path(path).resolve(strict=False) for path in _TRUSTED_EXECUTABLE_DIRS)
+    if not any(resolved.parent == trusted_dir for trusted_dir in trusted_dirs):
+        return None, f"resolved outside trusted executable directories: {command}"
 
     return str(resolved), None
 
