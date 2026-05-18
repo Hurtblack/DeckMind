@@ -29,9 +29,15 @@ class PlanResult:
     user turn — the loop ends. When `tool_calls` is non-empty, `text`
     is any narration the model emitted before deciding to call a tool
     (often empty); the loop continues after executing the tools.
+
+    `input_tokens` / `output_tokens` come from the provider's usage
+    report. They are best-effort: 0 when the provider doesn't ship
+    them with a streamed response.
     """
     text: str = ""
     tool_calls: list[PlannedCall] = field(default_factory=list)
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 @dataclass
@@ -67,6 +73,11 @@ TextDeltaCallback = Callable[[str], None]
 
 class LLMClient(ABC):
     """All provider clients implement this."""
+
+    # Concrete subclasses set this to the model name they're using
+    # (e.g. "gpt-4o-mini", "deepseek-chat"). Exposed so the CLI can
+    # show the model in the banner and per-turn footer.
+    model: str = ""
 
     @abstractmethod
     async def plan(

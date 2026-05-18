@@ -47,7 +47,7 @@ async def repl(verbose: bool) -> None:
     agent = await Agent.create(verbose=verbose)
     provider = os.environ.get("LLM_PROVIDER", "openai")
     mode = "verbose" if verbose else "quiet"
-    print(f"{BANNER}  [provider={provider} · {mode}]")
+    print(f"{BANNER}  [{provider} · {agent.model} · {mode}]")
 
     loop = asyncio.get_running_loop()
     while True:

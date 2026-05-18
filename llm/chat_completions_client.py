@@ -90,6 +90,8 @@ class ChatCompletionsClient(LLMClient):
         # `index`. Each entry: {"id": str, "name": str, "args": str}.
         tc_buffer: dict[int, dict[str, str]] = {}
         text_parts: list[str] = []
+        in_tok = 0
+        out_tok = 0
 
         stream = await self.client.chat.completions.create(
             model=self.model,
@@ -97,9 +99,18 @@ class ChatCompletionsClient(LLMClient):
             tools=self._to_tools(tools),
             tool_choice="auto",
             stream=True,
+            # Ask for a final usage chunk so we can show token counts.
+            # OpenAI / DeepSeek / Kimi / Qwen all honor this.
+            stream_options={"include_usage": True},
         )
 
         async for chunk in stream:
+            # The last chunk often has no choices but does have `usage`.
+            usage = getattr(chunk, "usage", None)
+            if usage is not None:
+                in_tok = getattr(usage, "prompt_tokens", 0) or in_tok
+                out_tok = getattr(usage, "completion_tokens", 0) or out_tok
+
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
@@ -137,4 +148,7 @@ class ChatCompletionsClient(LLMClient):
                 call_id=slot["id"],
             ))
 
-        return PlanResult(text="".join(text_parts), tool_calls=calls)
+        return PlanResult(
+            text="".join(text_parts), tool_calls=calls,
+            input_tokens=in_tok, output_tokens=out_tok,
+        )

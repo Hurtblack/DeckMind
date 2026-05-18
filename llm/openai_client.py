@@ -103,4 +103,10 @@ class OpenAIResponsesClient(LLMClient):
                 call_id=item.call_id,
             ))
 
-        return PlanResult(text="".join(text_parts), tool_calls=calls)
+        usage = getattr(response, "usage", None)
+        return PlanResult(
+            text="".join(text_parts),
+            tool_calls=calls,
+            input_tokens=getattr(usage, "input_tokens", 0) or 0,
+            output_tokens=getattr(usage, "output_tokens", 0) or 0,
+        )

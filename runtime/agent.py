@@ -38,9 +38,14 @@ class Agent:
 
     def __init__(self, *, verbose: bool = False, context_block: str = "") -> None:
         self.verbose = verbose
-        self.planner = Planner(make_client(), context_block=context_block)
+        client = make_client()
+        self.model = client.model
+        self.planner = Planner(client, context_block=context_block)
         self.executor = Executor()
         self.memory = SessionMemory(max_turns=6)
+        # Lifetime token counters across all turns this session.
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
 
     @classmethod
     async def create(cls, *, verbose: bool = False) -> "Agent":
@@ -80,24 +85,28 @@ class Agent:
         # tool_call/tool_result we record this turn.
         history: list[HistoryItem] = self.memory.snapshot()
 
-        # Bot output prefix. We only print it once, before the first
-        # text fragment arrives, so streamed tokens flow inline.
+        # Output prefix. Printed once before the first streamed
+        # fragment so tokens flow inline after it.
         prefix_printed = False
 
         def stream_to_stdout(fragment: str) -> None:
             nonlocal prefix_printed
             if not prefix_printed:
-                sys.stdout.write("bot> ")
+                sys.stdout.write("deckmind> ")
                 prefix_printed = True
             sys.stdout.write(fragment)
             sys.stdout.flush()
 
         reply_parts: list[str] = []
+        turn_input = 0
+        turn_output = 0
 
         for _ in range(MAX_STEPS):
             result = await self.planner.next_step(
                 history, on_text_delta=stream_to_stdout,
             )
+            turn_input += result.input_tokens
+            turn_output += result.output_tokens
 
             # Accumulate any narration text from this step.
             if result.text:
@@ -138,6 +147,17 @@ class Agent:
             note = f"(stopped after {MAX_STEPS} tool steps)"
             print(note)
             reply_parts.append(note)
+
+        # Update lifetime totals and print a faint footer with this
+        # turn's spend + the running session total.
+        self.total_input_tokens += turn_input
+        self.total_output_tokens += turn_output
+        if turn_input or turn_output:
+            print(
+                f"  \x1b[2m· {self.model}  |  this turn: "
+                f"{turn_input} in / {turn_output} out  |  session: "
+                f"{self.total_input_tokens} in / {self.total_output_tokens} out\x1b[0m"
+            )
 
         full_reply = "".join(reply_parts).strip()
         if full_reply:
