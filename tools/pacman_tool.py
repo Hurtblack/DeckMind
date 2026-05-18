@@ -31,13 +31,12 @@ import tempfile
 from typing import Any
 
 
-# Order matters: pacman tries the top entry first. Tsinghua and USTC
-# are the two most reliable Chinese Arch mirrors. SJTU and Aliyun are
-# decent backups. Global mirrors at the bottom in case all CN mirrors
-# are down (unusual but happens).
+# Order matters: pacman tries the top entry first. Tsinghua (TUNA)
+# is the default per the user's preference. USTC, SJTU, Aliyun, 163
+# are CN backups. Global fallback at the bottom.
 _CN_MIRRORS: tuple[str, ...] = (
-    "https://mirrors.ustc.edu.cn/archlinux/$repo/os/$arch",
     "https://mirrors.tuna.tsinghua.edu.cn/archlinux/$repo/os/$arch",
+    "https://mirrors.ustc.edu.cn/archlinux/$repo/os/$arch",
     "https://mirror.sjtu.edu.cn/archlinux/$repo/os/$arch",
     "https://mirrors.aliyun.com/archlinux/$repo/os/$arch",
     "https://mirrors.163.com/archlinux/$repo/os/$arch",
