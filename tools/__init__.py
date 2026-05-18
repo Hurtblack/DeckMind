@@ -14,7 +14,7 @@ from typing import Any, Awaitable, Callable
 
 from llm import ToolSpec
 
-from . import macro_tool, steam_tool, system_tool
+from . import macro_tool, package_tool, steam_tool, system_tool
 
 
 # Every tool is an async callable returning a dict.
@@ -57,6 +57,111 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
         ToolSpec(
             name="list_running_games",
             description="List currently running known games.",
+            parameters={"type": "object", "properties": {}},
+        ),
+    ),
+    "install_game": (
+        steam_tool.install_game,
+        ToolSpec(
+            name="install_game",
+            description=(
+                "Open Steam's install dialog for a known game. DESTRUCTIVE — "
+                "call first with confirm=false for a dry-run preview, then "
+                "again with confirm=true after the user explicitly approves."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "game_name": {"type": "string"},
+                    "confirm": {"type": "boolean", "default": False},
+                },
+                "required": ["game_name"],
+            },
+        ),
+    ),
+    "uninstall_game": (
+        steam_tool.uninstall_game,
+        ToolSpec(
+            name="uninstall_game",
+            description=(
+                "Open Steam's uninstall dialog for a known game. DESTRUCTIVE — "
+                "call first with confirm=false for a dry-run preview, then "
+                "again with confirm=true after the user explicitly approves."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "game_name": {"type": "string"},
+                    "confirm": {"type": "boolean", "default": False},
+                },
+                "required": ["game_name"],
+            },
+        ),
+    ),
+    "list_flatpak_apps": (
+        package_tool.list_flatpak_apps,
+        ToolSpec(
+            name="list_flatpak_apps",
+            description="List every installed Flatpak app with its on-disk size.",
+            parameters={"type": "object", "properties": {}},
+        ),
+    ),
+    "search_flatpak": (
+        package_tool.search_flatpak,
+        ToolSpec(
+            name="search_flatpak",
+            description="Search Flathub for apps matching a keyword (e.g. 'dolphin', 'nes emulator').",
+            parameters={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        ),
+    ),
+    "install_flatpak": (
+        package_tool.install_flatpak,
+        ToolSpec(
+            name="install_flatpak",
+            description=(
+                "Install a Flatpak app from Flathub by its app_id "
+                "(e.g. 'org.DolphinEmu.dolphin-emu'). DESTRUCTIVE — call "
+                "first with confirm=false for dry-run, then with confirm=true "
+                "after the user explicitly approves."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "app_id": {"type": "string"},
+                    "confirm": {"type": "boolean", "default": False},
+                },
+                "required": ["app_id"],
+            },
+        ),
+    ),
+    "uninstall_flatpak": (
+        package_tool.uninstall_flatpak,
+        ToolSpec(
+            name="uninstall_flatpak",
+            description=(
+                "Uninstall a Flatpak app by its app_id. DESTRUCTIVE — call "
+                "first with confirm=false for dry-run (returns current size), "
+                "then with confirm=true after the user explicitly approves."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "app_id": {"type": "string"},
+                    "confirm": {"type": "boolean", "default": False},
+                },
+                "required": ["app_id"],
+            },
+        ),
+    ),
+    "disk_usage": (
+        package_tool.disk_usage,
+        ToolSpec(
+            name="disk_usage",
+            description="Show human-readable disk usage for / and /home.",
             parameters={"type": "object", "properties": {}},
         ),
     ),

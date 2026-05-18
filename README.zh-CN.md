@@ -205,6 +205,27 @@ export MOONSHOT_API_KEY=sk-...
 uv run python main.py
 ```
 
+## 内置工具
+
+| 分组 | 工具 | 破坏性？ |
+|---|---|---|
+| Steam | `launch_game`、`close_game`、`list_running_games` | 否 |
+| Steam | `install_game`、`uninstall_game` | **是（两步确认）** |
+| 包管理 | `list_flatpak_apps`、`search_flatpak`、`disk_usage` | 否 |
+| 包管理 | `install_flatpak`、`uninstall_flatpak` | **是（两步确认）** |
+| 系统 | `get_battery`、`get_volume`、`set_volume` | 否 |
+| 宏 | `press_key`、`start_key_loop`、`stop_all_macros` | 否 |
+| Meta | `final_answer` | — |
+
+### 两步确认机制
+
+任何"安装 / 卸载"工具都接受 `confirm: bool` 参数，Agent 永远会调用两次：
+
+1. **预览那一轮** —— `confirm=false`：工具只返回**会发生什么**（包名、占用空间等），Agent 用 `final_answer` 把信息呈现给你并问你"确认吗？"
+2. **执行那一轮** —— 你回复"确认 / 是 / yes"之后，Agent 用 `confirm=true` 再调一次同一个工具真正执行
+
+这样可以避免 Agent 自作主张地"啪"一下把整个 EmuDeck 给删了 —— 你必须先看到预览、再明确说一句"确认"才会发生。
+
 ## 示例对话
 
 ```
@@ -229,6 +250,22 @@ you> 打开 CS2
   ▸ tool: launch_game({'game_name': 'cs2'})
     ↳ {'ok': True, 'game': 'cs2', 'app_id': '730', 'pid': 12345}
 bot> 正在启动 CS2。
+
+you> 帮我卸载 Dolphin 模拟器
+  ▸ tool: list_flatpak_apps({})
+    ↳ {'ok': True, 'count': 23, 'apps': [...,
+         {'app_id': 'org.DolphinEmu.dolphin-emu', 'name': 'Dolphin', 'size': '412 MB'}]}
+  ▸ tool: uninstall_flatpak({'app_id': 'org.DolphinEmu.dolphin-emu', 'confirm': False})
+    ↳ {'ok': True, 'dry_run': True, 'size': '412 MB',
+       'message': 'Will uninstall ... Ask the user to confirm...'}
+  ▸ tool: final_answer({'message': '找到了 Dolphin (412 MB)。确认卸载吗？'})
+bot> 找到了 Dolphin (412 MB)。确认卸载吗？
+
+you> 确认
+  ▸ tool: uninstall_flatpak({'app_id': 'org.DolphinEmu.dolphin-emu', 'confirm': True})
+    ↳ {'ok': True, 'uninstalled': 'org.DolphinEmu.dolphin-emu', ...}
+  ▸ tool: final_answer({'message': '已卸载 Dolphin，释放约 412 MB。'})
+bot> 已卸载 Dolphin，释放约 412 MB。
 ```
 
 ## 一些说明与限制

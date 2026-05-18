@@ -69,6 +69,72 @@ async def close_game(process_name: str) -> dict[str, Any]:
             "process": process_name}
 
 
+async def install_game(game_name: str, confirm: bool = False) -> dict[str, Any]:
+    """Open Steam's install dialog for a known game.
+
+    Two-step confirmation: confirm=False returns a preview; confirm=True
+    actually launches the Steam URI, which opens the install dialog in
+    Steam itself (the user still clicks "Install" there to start the
+    download).
+    """
+    key = game_name.strip().lower()
+    app_id = _GAME_REGISTRY.get(key)
+    if app_id is None:
+        return {"ok": False,
+                "error": f"Unknown game '{game_name}'. Known: {list(_GAME_REGISTRY)}"}
+
+    if not confirm:
+        return {
+            "ok": True, "dry_run": True, "game": key, "app_id": app_id,
+            "message": (
+                f"Will open Steam's install dialog for '{key}' (AppID {app_id}). "
+                "Ask the user to confirm, then call again with confirm=true."
+            ),
+        }
+
+    if not _has_steam():
+        return {"ok": True, "mock": True, "game": key, "app_id": app_id,
+                "note": "steam binary not found; pretending to open install dialog"}
+
+    proc = await asyncio.create_subprocess_exec(
+        "steam", f"steam://install/{app_id}",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    return {"ok": True, "game": key, "app_id": app_id, "pid": proc.pid,
+            "note": "Steam install dialog opened — user must click Install there."}
+
+
+async def uninstall_game(game_name: str, confirm: bool = False) -> dict[str, Any]:
+    """Open Steam's uninstall dialog for a known game (two-step confirm)."""
+    key = game_name.strip().lower()
+    app_id = _GAME_REGISTRY.get(key)
+    if app_id is None:
+        return {"ok": False,
+                "error": f"Unknown game '{game_name}'. Known: {list(_GAME_REGISTRY)}"}
+
+    if not confirm:
+        return {
+            "ok": True, "dry_run": True, "game": key, "app_id": app_id,
+            "message": (
+                f"Will open Steam's uninstall dialog for '{key}' (AppID {app_id}). "
+                "Ask the user to confirm, then call again with confirm=true."
+            ),
+        }
+
+    if not _has_steam():
+        return {"ok": True, "mock": True, "game": key, "app_id": app_id,
+                "note": "steam binary not found; pretending to open uninstall dialog"}
+
+    proc = await asyncio.create_subprocess_exec(
+        "steam", f"steam://uninstall/{app_id}",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    return {"ok": True, "game": key, "app_id": app_id, "pid": proc.pid,
+            "note": "Steam uninstall dialog opened — user must confirm in Steam."}
+
+
 async def list_running_games() -> dict[str, Any]:
     """List processes that look like known games.
 

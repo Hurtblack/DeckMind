@@ -211,6 +211,32 @@ does not change.
 uv run python main.py
 ```
 
+## Built-in tools
+
+| Group | Tool | Destructive? |
+|---|---|---|
+| Steam | `launch_game`, `close_game`, `list_running_games` | no |
+| Steam | `install_game`, `uninstall_game` | **yes (2-step confirm)** |
+| Packages | `list_flatpak_apps`, `search_flatpak`, `disk_usage` | no |
+| Packages | `install_flatpak`, `uninstall_flatpak` | **yes (2-step confirm)** |
+| System | `get_battery`, `get_volume`, `set_volume` | no |
+| Macro | `press_key`, `start_key_loop`, `stop_all_macros` | no |
+| Meta | `final_answer` | — |
+
+### Two-step confirmation
+
+Any tool that installs or uninstalls software accepts a `confirm: bool`
+argument. The agent always calls it twice:
+
+1. **Preview turn** — `confirm=false`: the tool reports what *would*
+   happen (app id, disk size, etc.) and the agent asks the user to
+   approve.
+2. **Execution turn** — on the user's "yes/确认" reply, the agent calls
+   the same tool with `confirm=true`.
+
+This makes it impossible for the agent to silently wipe an app — the
+user always sees a preview and types an explicit confirmation first.
+
 ## Example session
 
 ```
@@ -235,6 +261,22 @@ you> 打开 CS2
   ▸ tool: launch_game({'game_name': 'cs2'})
     ↳ {'ok': True, 'game': 'cs2', 'app_id': '730', 'pid': 12345}
 bot> Launching CS2.
+
+you> 帮我卸载 Dolphin 模拟器
+  ▸ tool: list_flatpak_apps({})
+    ↳ {'ok': True, 'count': 23, 'apps': [...,
+         {'app_id': 'org.DolphinEmu.dolphin-emu', 'name': 'Dolphin', 'size': '412 MB'}]}
+  ▸ tool: uninstall_flatpak({'app_id': 'org.DolphinEmu.dolphin-emu', 'confirm': False})
+    ↳ {'ok': True, 'dry_run': True, 'app_id': 'org.DolphinEmu.dolphin-emu',
+       'size': '412 MB', 'message': 'Will uninstall ... Ask the user to confirm...'}
+  ▸ tool: final_answer({'message': '找到了 Dolphin (412 MB)。确认卸载吗？'})
+bot> 找到了 Dolphin (412 MB)。确认卸载吗？
+
+you> 确认
+  ▸ tool: uninstall_flatpak({'app_id': 'org.DolphinEmu.dolphin-emu', 'confirm': True})
+    ↳ {'ok': True, 'uninstalled': 'org.DolphinEmu.dolphin-emu', ...}
+  ▸ tool: final_answer({'message': '已卸载 Dolphin，释放约 412 MB。'})
+bot> 已卸载 Dolphin，释放约 412 MB。
 ```
 
 ## Notes & limitations
