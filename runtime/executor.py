@@ -40,6 +40,8 @@ RISK_SAFE: set[str] = {
     "find_files",
     "list_processes",
     "read_text_file",
+    # Pacman search — read-only query.
+    "pacman_search",
     # Profile read/write: only touches a small user-owned JSON file.
     # Prompting before every "记住我叫 X" would ruin the conversation.
     "remember",
@@ -80,6 +82,9 @@ RISK_DESTRUCTIVE: set[str] = {
     # Writes a file inside the user's home — same dry-run/confirm gate
     # as the install/uninstall tools.
     "write_text_file",
+    # Pacman writes (require sudo + dirty /usr).
+    "pacman_install",
+    "set_pacman_mirror_china",
 }
 
 def _risk_of(name: str) -> str:

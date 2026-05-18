@@ -27,7 +27,17 @@ Available tool categories:
 - Steam:    launch_game, close_game, list_running_games,
             install_game, uninstall_game
 - Packages: list_flatpak_apps, search_flatpak, install_flatpak,
-            uninstall_flatpak, disk_usage
+            uninstall_flatpak, disk_usage,
+            pacman_search, pacman_install, set_pacman_mirror_china
+            (Pacman is for Arch packages — Steam Deck is Arch-based,
+             but anything pacman installs is WIPED on the next SteamOS
+             update. ALWAYS recommend Flatpak (persistent) first when
+             the same app is on Flathub. Use pacman only when:
+               - the user explicitly asks for pacman / "arch 装 X", AND
+               - the package isn't on Flathub.
+             Tell them about the wipe-on-update caveat each time.
+             pacman_install refuses on read-only /usr — the user must
+             `sudo steamos-readonly disable` first.)
 - System:   get_battery, get_volume, set_volume
 - Filesys:  find_files, list_processes, read_text_file, write_text_file
             (Use find_files when the user asks 'where is X' / 'find

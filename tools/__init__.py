@@ -16,7 +16,7 @@ from llm import ToolSpec
 
 from . import (
     file_tool, file_write_tool, macro_tool, notion_tool, package_tool,
-    profile_tool, steam_tool, system_tool, update_tool,
+    pacman_tool, profile_tool, steam_tool, system_tool, update_tool,
 )
 
 
@@ -154,6 +154,68 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
                     "confirm": {"type": "boolean", "default": False},
                 },
                 "required": ["app_id"],
+            },
+        ),
+    ),
+    "pacman_search": (
+        pacman_tool.pacman_search,
+        ToolSpec(
+            name="pacman_search",
+            description=(
+                "Search Arch Linux pacman repos for a package. Read-only, "
+                "no sudo. Use for 'arch 有没有 X' / 'search pacman for X'."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        ),
+    ),
+    "pacman_install": (
+        pacman_tool.pacman_install,
+        ToolSpec(
+            name="pacman_install",
+            description=(
+                "Install Arch packages via pacman. DESTRUCTIVE — 2-step "
+                "confirm. Requires writable /usr (on SteamOS the user "
+                "must `sudo steamos-readonly disable` first; this tool "
+                "refuses if /usr is RO). ALWAYS warn the user that "
+                "anything installed will be WIPED on the next SteamOS "
+                "update — prefer Flatpak (persistent) or distrobox "
+                "(containerized) when those are options. sudo prompts "
+                "for the password on the user's terminal."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "packages": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Package names, e.g. ['htop','neovim']",
+                    },
+                    "confirm": {"type": "boolean", "default": False},
+                },
+                "required": ["packages"],
+            },
+        ),
+    ),
+    "set_pacman_mirror_china": (
+        pacman_tool.set_pacman_mirror_china,
+        ToolSpec(
+            name="set_pacman_mirror_china",
+            description=(
+                "Replace /etc/pacman.d/mirrorlist with Chinese mirrors "
+                "(USTC, Tsinghua, SJTU, Aliyun, 163 + global fallback). "
+                "DESTRUCTIVE — 2-step confirm. Backs the original up to "
+                "mirrorlist.deckmind.bak first time. Use when user says "
+                "'换成国内镜像' / 'switch pacman mirror to China'."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "confirm": {"type": "boolean", "default": False},
+                },
             },
         ),
     ),
