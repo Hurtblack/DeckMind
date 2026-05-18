@@ -5,6 +5,7 @@ description = "Minimal local LLM agent for Steam Deck / Linux."
 requires-python = ">=3.11"
 dependencies = [
     "openai>=1.51.0",
+    "httpx>=0.27.0",
 ]
 
 # pynput is optional because:

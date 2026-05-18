@@ -15,7 +15,7 @@ from typing import Any, Awaitable, Callable
 from llm import ToolSpec
 
 from . import (
-    macro_tool, package_tool, profile_tool,
+    macro_tool, notion_tool, package_tool, profile_tool,
     steam_tool, system_tool, update_tool,
 )
 
@@ -212,6 +212,72 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
                 "and you want to confirm against the latest on-disk state."
             ),
             parameters={"type": "object", "properties": {}},
+        ),
+    ),
+    "notion_status": (
+        notion_tool.notion_status,
+        ToolSpec(
+            name="notion_status",
+            description=(
+                "Show whether Notion is connected and which database is "
+                "configured. Use first if other notion_* calls fail, or "
+                "when the user asks 'connected to notion?' / '绑了 notion 吗'."
+            ),
+            parameters={"type": "object", "properties": {}},
+        ),
+    ),
+    "notion_log_session": (
+        notion_tool.notion_log_session,
+        ToolSpec(
+            name="notion_log_session",
+            description=(
+                "Append one play-session row to the Notion database. "
+                "Use when the user reports having played something "
+                "(e.g. '记一笔我刚玩了 1 小时 CS2'). `minutes` is integer "
+                "minutes. `date` defaults to today (YYYY-MM-DD). `notes` "
+                "is optional free-text."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "game": {"type": "string"},
+                    "minutes": {"type": "integer", "minimum": 1},
+                    "notes": {"type": "string"},
+                    "date": {"type": "string", "description": "YYYY-MM-DD"},
+                },
+                "required": ["game", "minutes"],
+            },
+        ),
+    ),
+    "notion_recent": (
+        notion_tool.notion_recent,
+        ToolSpec(
+            name="notion_recent",
+            description="Return the N most-recently-logged play sessions.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 10},
+                },
+            },
+        ),
+    ),
+    "notion_total": (
+        notion_tool.notion_total,
+        ToolSpec(
+            name="notion_total",
+            description=(
+                "Sum playtime over the last `days` days, with a top-5 "
+                "per-game breakdown. Use for '本周玩了多少' / "
+                "'这个月谁玩得最多' / weekly summary."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "minimum": 1, "maximum": 365,
+                             "description": "Look back this many days (7=week, 30=month)"},
+                },
+            },
         ),
     ),
     "check_for_updates": (

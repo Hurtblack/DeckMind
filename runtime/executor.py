@@ -41,6 +41,10 @@ RISK_SAFE: set[str] = {
     "remember",
     "forget",
     "list_profile",
+    # Notion reads — pure queries, no writes.
+    "notion_status",
+    "notion_recent",
+    "notion_total",
 }
 
 RISK_SIDE_EFFECT: set[str] = {
@@ -50,6 +54,10 @@ RISK_SIDE_EFFECT: set[str] = {
     "stop_all_macros",
     "launch_game",
     "close_game",
+    # Writes a new row to the user's Notion DB. Worth a [y/n/a] prompt
+    # so the user can press `a` once and stop being asked for the rest
+    # of the session (typical for batch logging).
+    "notion_log_session",
 }
 
 RISK_DESTRUCTIVE: set[str] = {

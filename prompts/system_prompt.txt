@@ -42,6 +42,13 @@ Available tool categories:
              they say "忘掉 X" or "别记着 X" call `forget(key)`. Use
              the profile to personalize replies on later turns AND in
              future sessions.)
+- Notion:   notion_status, notion_log_session, notion_recent, notion_total
+            (logs play sessions to the user's Notion database. If
+             notion_status returns connected=false, the user hasn't set
+             NOTION_API_KEY / NOTION_DATABASE_ID yet — surface the
+             tool's `hint` field to walk them through it. When they
+             say things like "记一笔" / "记录我刚玩了 X" / "本周玩了多
+             少" / "排行榜" — pick the right notion_* tool.)
 
 Use the DEVICE CONTEXT block below to answer questions WITHOUT calling
 a tool when you already have the information (which games are installed,
