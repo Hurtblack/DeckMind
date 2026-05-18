@@ -226,15 +226,26 @@ uv run python main.py
 |---|---|---|
 | `safe`（安全） | 静默放行 | get_*、list_*、search_*、disk_usage、final_answer |
 | `side_effect`（副作用） | 弹 `[y=允许 / n=拒绝 / a=本工具本会话全允许]` | set_volume、press_key、start_key_loop、stop_all_macros、launch_game、close_game |
-| `destructive`（破坏性） | 永远在执行前询问用户。如果 LLM 跳过了推荐的 `confirm=false` dry-run 直接 confirm=true，会弹**加强版警告**告诉你预览被跳过了 | install_*、uninstall_* |
+| `destructive`（破坏性） | `confirm=false` 是免费预览；`confirm=true` 执行前弹 `[y/n]` | install_*、uninstall_* |
 
-闸门**从不静默拒绝** —— 每个有风险的调用都会问你，最终决定权永远在你手里。
+闸门默认**问而不拦**，最终决定权永远在你手里。
 
-工具内的额外加固：
+### 什么情况会硬拒绝并说明原因
 
-- **`close_game`** 如果 `process_name` 长度不到 3 个字符（会匹配太多进程），
-  或包含黑名单子串（`steam`、`systemd`、`kwin`、`plasma`、`sshd`、`python` 等），
-  会**额外弹一个警告询问** —— 你仍然可以同意继续，这只是警告不是拦截。
+有一小类操作真的会**搞坏正在运行的系统**，工具会直接拒绝并清楚说明原因（LLM
+会把原因复述给你而不是装糊涂）：
+
+- **`close_game`** 拒绝匹配以下任意一个的 `process_name`：
+  `systemd`、`init`、`kernel`、`gamescope`、`kwin`、`plasma`、`kded`、`xorg`、
+  `wayland`、`pipewire`、`pulseaudio`、`dbus`。每个都带一句原因
+  （例如 "PID 1 / system init — 杀掉会导致整机崩溃"）。
+- **`uninstall_flatpak`** 拒绝所有 Flatpak 共享运行时
+  （`org.freedesktop.Platform`、`org.freedesktop.Sdk`、`org.kde.Platform`、
+  `org.gnome.Platform` 及其 `.Sdk` / `.Locale` / `.GL.*` 等子 ID）。
+  删掉它们会让系统上所有 Flatpak 应用一起挂掉。
+
+其他情况 —— 哪怕看上去有点吓人，比如要 `kill` 一个叫 `bash` 的进程，
+或者卸载某个第三方模拟器 —— 都只会走正常的询问流程交给你决定。
 
 ## 示例对话
 

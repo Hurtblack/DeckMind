@@ -53,51 +53,53 @@ async def launch_game(game_name: str) -> dict[str, Any]:
     return {"ok": True, "game": key, "app_id": app_id, "pid": proc.pid}
 
 
-# Substrings we refuse to pkill — killing any of these would brick the
-# session or the desktop. Matched case-insensitively against process_name.
-_CLOSE_GAME_DENYLIST: tuple[str, ...] = (
-    "steam", "systemd", "pulseaudio", "pipewire", "wpctl",
-    "kwin", "plasma", "kded", "konsole", "xorg", "wayland", "gamescope",
-    "sshd", "bash", "zsh", "python", "init", "kernel",
-    "dbus", "polkit", "udev", "networkmanager",
-)
+# Processes whose death would break the running system in ways the user
+# almost certainly does NOT want (kernel/init/desktop session/audio).
+# We hard-refuse these with a clear explanation. Everything else
+# (including 'steam', 'bash', etc.) goes through the normal Executor
+# prompt — the user can decide.
+_CLOSE_GAME_CRITICAL: dict[str, str] = {
+    "systemd":    "PID 1 / system init — killing this crashes the machine",
+    "init":       "PID 1 / system init — killing this crashes the machine",
+    "kernel":     "kernel thread — cannot be killed safely",
+    "gamescope":  "Steam Deck's Game Mode compositor — kills the whole UI",
+    "kwin":       "KDE window manager — kills your desktop session",
+    "plasma":     "KDE shell — kills your desktop session",
+    "kded":       "KDE daemon — desktop will become unusable",
+    "xorg":       "X display server — kills your desktop session",
+    "wayland":    "Wayland display server — kills your desktop session",
+    "pipewire":   "system audio server — system-wide sound stops",
+    "pulseaudio": "system audio server — system-wide sound stops",
+    "dbus":       "system IPC bus — most apps will stop responding",
+}
 
 
 async def close_game(process_name: str) -> dict[str, Any]:
     """Kill a running game by process name using `pkill -f`.
 
-    Dangerous inputs (too short, or containing a denylisted substring)
-    trigger an extra warning prompt — the user can still approve. We
-    never refuse outright.
+    Hard-refuses (with reason) only when the name would match a process
+    that, if killed, would break the running system. Everything else is
+    allowed — the Executor's side-effect prompt is the user's chance to
+    veto a questionable name.
     """
     if not shutil.which("pkill"):
         return {"ok": False, "error": "pkill not available on this system"}
 
-    # Local import to avoid a top-level dependency on the runtime package.
-    from runtime.prompt import ask, is_yes
-
     name = (process_name or "").strip()
-
-    if len(name) < 3:
-        ans = await ask(
-            f"    ⚠ very short process_name {name!r} — pkill -f will match "
-            f"a LOT of processes. Continue? [y/n] > "
-        )
-        if not is_yes(ans):
-            return {"ok": False, "denied": True,
-                    "reason": "user declined short process_name"}
+    if not name:
+        return {"ok": False, "error": "empty process_name"}
 
     lower = name.lower()
-    for bad in _CLOSE_GAME_DENYLIST:
+    for bad, why in _CLOSE_GAME_CRITICAL.items():
         if bad in lower:
-            ans = await ask(
-                f"    🚨 process_name contains {bad!r} — this may kill a "
-                f"system process and break your session. Continue? [y/n] > "
-            )
-            if not is_yes(ans):
-                return {"ok": False, "denied": True,
-                        "reason": f"user declined denylisted match on {bad!r}"}
-            break  # one warning is enough — don't pile prompts
+            return {
+                "ok": False, "refused": True, "process": name,
+                "matched": bad, "reason": why,
+                "message": (
+                    f"Refusing to pkill -f {name!r}: it matches {bad!r}, "
+                    f"which is a critical system process ({why})."
+                ),
+            }
 
     proc = await asyncio.create_subprocess_exec(
         "pkill", "-f", name,

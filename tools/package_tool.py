@@ -104,6 +104,35 @@ async def disk_usage() -> dict[str, Any]:
 
 # ---------- destructive: install / uninstall ----------
 
+# Flatpak app IDs we refuse to uninstall, with the reason. These are
+# shared runtimes that other Flatpak apps depend on — removing one
+# breaks every app that builds on it. Matched as a prefix on app_id
+# so e.g. "org.freedesktop.Platform.GL.default" is also caught.
+_FLATPAK_CRITICAL_PREFIXES: dict[str, str] = {
+    "org.freedesktop.Platform":
+        "shared runtime that almost every Flatpak app depends on",
+    "org.freedesktop.Sdk":
+        "shared SDK that almost every Flatpak app depends on",
+    "org.freedesktop.BasePlatform":
+        "shared base platform that other Flatpak runtimes depend on",
+    "org.kde.Platform":
+        "KDE runtime — required by most KDE/Qt Flatpak apps on the Deck",
+    "org.kde.Sdk":
+        "KDE SDK — required by KDE/Qt Flatpak apps",
+    "org.gnome.Platform":
+        "GNOME runtime — required by GTK Flatpak apps",
+    "org.gnome.Sdk":
+        "GNOME SDK — required by GTK Flatpak apps",
+}
+
+
+def _flatpak_critical_reason(app_id: str) -> str | None:
+    """Return the refusal reason if `app_id` is a protected runtime."""
+    for prefix, reason in _FLATPAK_CRITICAL_PREFIXES.items():
+        if app_id == prefix or app_id.startswith(prefix + "."):
+            return reason
+    return None
+
 async def _flatpak_size_of(app_id: str) -> str:
     """Look up the installed size of one app (empty string if not found)."""
     rc, out, _ = await _run(
@@ -148,7 +177,25 @@ async def install_flatpak(app_id: str, confirm: bool = False) -> dict[str, Any]:
 
 
 async def uninstall_flatpak(app_id: str, confirm: bool = False) -> dict[str, Any]:
-    """Uninstall a Flatpak app. Two-step confirmation, same pattern as install."""
+    """Uninstall a Flatpak app. Two-step confirmation, same pattern as install.
+
+    Hard-refuses (with reason) if `app_id` is a shared runtime — those
+    are dependencies of every other Flatpak app and removing them
+    breaks the whole Flatpak install.
+    """
+    # Hard refusal runs FIRST so it still fires on systems without
+    # flatpak — keeps the safety contract consistent.
+    critical = _flatpak_critical_reason(app_id)
+    if critical is not None:
+        return {
+            "ok": False, "refused": True, "app_id": app_id,
+            "reason": critical,
+            "message": (
+                f"Refusing to uninstall {app_id!r}: {critical}. "
+                "Removing it would break other Flatpak apps that depend on it."
+            ),
+        }
+
     if not _has("flatpak"):
         return {"ok": False, "error": "flatpak not installed"}
 

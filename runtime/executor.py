@@ -1,23 +1,20 @@
 """Executor: dispatches tool calls + asks the user when a call is risky.
 
-Policy: never silently refuse. Whenever a call looks dangerous, the
-Executor asks the user — the user always has final say.
+Policy: ask the user, don't silently block. The only hard refusals
+happen inside individual tools, and only when an operation would
+actually break the running system (uninstalling a shared Flatpak
+runtime, killing PID 1, etc.). Those refusals always come with a
+clear `reason` so the LLM can explain why to the user.
 
-Three risk classes:
+Three risk classes here in the Executor:
 
   - safe         : read-only ops. Pass through silently.
   - side_effect  : ask [y/n/a] before each call.
                    `a` = allow this tool for the rest of the session.
-  - destructive  : recommended path is dry-run (confirm=false) then
-                   confirm=true. The Executor asks the user before
-                   running confirm=true. If the LLM skips the dry-run
-                   and calls confirm=true directly, the user gets a
-                   stronger warning prompt — but can still approve.
+  - destructive  : confirm=false is a free preview (dry-run);
+                   confirm=true triggers a [y/n] prompt before running.
 
 Unknown tools are treated as destructive.
-
-A separate per-tool input check (e.g. close_game's denylist) lives
-inside each tool — also as a warning prompt, never a hard refusal.
 """
 
 from __future__ import annotations
@@ -57,16 +54,6 @@ RISK_DESTRUCTIVE: set[str] = {
     "uninstall_flatpak",
 }
 
-# For destructive tools, the argument that identifies the target. Used
-# to match a confirm=true call against an earlier dry-run preview.
-DESTRUCTIVE_KEY: dict[str, str] = {
-    "install_game": "game_name",
-    "uninstall_game": "game_name",
-    "install_flatpak": "app_id",
-    "uninstall_flatpak": "app_id",
-}
-
-
 def _risk_of(name: str) -> str:
     """Return the risk class for a tool. Unknown tools count as destructive."""
     if name in RISK_SAFE:
@@ -86,9 +73,6 @@ class Executor:
     def __init__(self) -> None:
         # Side-effect tools the user white-listed for this session.
         self._allow_all: set[str] = set()
-        # (tool_name, key) pairs already dry-run in this session — used
-        # to decide whether a confirm=true call had a recent preview.
-        self._dry_run_seen: set[tuple[str, str]] = set()
 
     async def run(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Gate + dispatch one tool call."""
@@ -116,29 +100,16 @@ class Executor:
                             "reason": f"user rejected side-effect call to {name}"}
 
         elif risk == "destructive":
-            key_arg = DESTRUCTIVE_KEY.get(name, "")
-            target = str(arguments.get(key_arg, "")).strip().lower()
             confirm = bool(arguments.get("confirm", False))
-
-            if not confirm:
-                # Dry-run path: harmless. Remember it so a later
-                # confirm=true call is recognized as "previewed first".
-                self._dry_run_seen.add((name, target))
-            else:
-                # Real execution. Decide which warning to use based on
-                # whether the LLM did a dry-run first.
-                if (name, target) in self._dry_run_seen:
-                    prompt = (f"    🚨 DESTRUCTIVE: {name}({arguments})  "
-                              f"[y=确认执行 / n=取消] > ")
-                else:
-                    prompt = (f"    🚨 DESTRUCTIVE (NO DRY-RUN!): "
-                              f"{name}({arguments})  "
-                              f"LLM skipped the preview step — please double-check. "
-                              f"[y=确认执行 / n=取消] > ")
-                ans = await ask(prompt)
+            if confirm:
+                ans = await ask(
+                    f"    🚨 DESTRUCTIVE: {name}({arguments})  "
+                    f"[y=确认执行 / n=取消] > "
+                )
                 if not is_yes(ans):
                     return {"ok": False, "denied": True,
                             "reason": f"user rejected destructive call to {name}"}
+            # confirm=False is a dry-run — harmless, pass through silently.
 
         # ----- execute -----
         try:

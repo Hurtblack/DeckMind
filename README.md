@@ -233,18 +233,32 @@ system-prompt rules. Three risk classes:
 |---|---|---|
 | `safe` | runs silently | get_*, list_*, search_*, disk_usage, final_answer |
 | `side_effect` | prompts `[y / n / a]` (a = allow this tool for the rest of the session) | set_volume, press_key, start_key_loop, stop_all_macros, launch_game, close_game |
-| `destructive` | always prompts before executing. If the LLM skipped the recommended `confirm=false` dry-run first, the prompt switches to a **stronger warning** so you know the preview step was skipped. | install_*, uninstall_* |
+| `destructive` | `confirm=false` is a free preview; `confirm=true` prompts `[y / n]` before running | install_*, uninstall_* |
 
-The gate **never refuses silently** — every risky call asks you. The
-user always has the final word.
+The gate's default is **ask, don't block** — you always have the final
+word.
 
-Extra hardening inside individual tools:
+### When the agent will hard-refuse with a reason
 
-- **`close_game`** issues an additional warning prompt if the
-  `process_name` is shorter than 3 chars (would match too many
-  processes) or contains a denylisted substring (`steam`, `systemd`,
-  `kwin`, `plasma`, `sshd`, `python`, …). You can still approve and
-  proceed — it's a warning, not a block.
+A small set of operations would actually break the running system, so
+the tools themselves refuse them outright and report why. The LLM sees
+the reason and explains it back to you instead of just looking
+confused.
+
+- **`close_game`** refuses `process_name` values matching any of:
+  `systemd`, `init`, `kernel`, `gamescope`, `kwin`, `plasma`, `kded`,
+  `xorg`, `wayland`, `pipewire`, `pulseaudio`, `dbus`. Each comes with
+  a one-line reason (e.g. "PID 1 / system init — killing this crashes
+  the machine").
+- **`uninstall_flatpak`** refuses app IDs that are shared runtimes
+  every other Flatpak app depends on: `org.freedesktop.Platform`,
+  `org.freedesktop.Sdk`, `org.kde.Platform`, `org.gnome.Platform`,
+  and their `.Sdk` / `.Locale` / `.GL.*` sub-IDs. Removing one of these
+  breaks every Flatpak app on the system.
+
+Everything else — including arguably scary stuff like killing a process
+named `bash`, or uninstalling a third-party emulator — just goes
+through the normal prompt and lets you decide.
 
 ## Example session
 
