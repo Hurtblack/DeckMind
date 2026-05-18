@@ -1,8 +1,21 @@
 from __future__ import annotations
 
+import importlib.util
 import unittest
+from pathlib import Path
 
-from tools.command_tool import validate_command
+
+def load_command_tool():
+    module_path = Path(__file__).resolve().parents[1] / "tools" / "command_tool.py"
+    spec = importlib.util.spec_from_file_location("command_tool_under_test", module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load command_tool from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+validate_command = load_command_tool().validate_command
 
 
 class CommandToolValidationTests(unittest.TestCase):
