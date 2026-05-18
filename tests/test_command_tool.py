@@ -229,6 +229,29 @@ class CommandToolValidationTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertIn("credential-like URL parameter", result.reason or "")
 
+
+class CommandToolExecutionPathTests(unittest.IsolatedAsyncioTestCase):
+    async def test_run_command_returns_dry_run_preview_without_confirmation(self) -> None:
+        module = load_command_tool()
+
+        result = await module.run_command(["which", "sh"], confirm=False)
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["command"], "which")
+
+    async def test_run_command_executes_harmless_which_with_confirmation(self) -> None:
+        module = load_command_tool()
+
+        result = await module.run_command(["which", "sh"], confirm=True)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["command"], "which")
+        self.assertEqual(result["returncode"], 0)
+        self.assertTrue(result["stdout_tail"])
+
+
+class CommandToolExecutionFailureTests(unittest.TestCase):
     def test_execute_validated_times_out(self) -> None:
         import asyncio
         from unittest.mock import AsyncMock, patch
