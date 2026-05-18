@@ -217,14 +217,25 @@ uv run python main.py
 | 宏 | `press_key`、`start_key_loop`、`stop_all_macros` | 否 |
 | Meta | `final_answer` | — |
 
-### 两步确认机制
+### Runtime 权限闸门（代码层强制）
 
-任何"安装 / 卸载"工具都接受 `confirm: bool` 参数，Agent 永远会调用两次：
+[`runtime/executor.py`](runtime/executor.py) 在每次调用工具**之前**做权限检查 ——
+这是**代码层面**的限制，跟 system prompt 的约束相互独立，比它更硬。三档：
 
-1. **预览那一轮** —— `confirm=false`：工具只返回**会发生什么**（包名、占用空间等），Agent 用 `final_answer` 把信息呈现给你并问你"确认吗？"
-2. **执行那一轮** —— 你回复"确认 / 是 / yes"之后，Agent 用 `confirm=true` 再调一次同一个工具真正执行
+| 风险等级 | 行为 | 工具 |
+|---|---|---|
+| `safe`（安全） | 静默放行 | get_*、list_*、search_*、disk_usage、final_answer |
+| `side_effect`（副作用） | 弹 `[y=允许 / n=拒绝 / a=本工具本会话全允许]` | set_volume、press_key、start_key_loop、stop_all_macros、launch_game、close_game |
+| `destructive`（破坏性） | **必须**先有匹配的 `confirm=false` dry-run 在前，**并且**用户在第二次提示里输 `y` 才会执行 | install_*、uninstall_* |
 
-这样可以避免 Agent 自作主张地"啪"一下把整个 EmuDeck 给删了 —— 你必须先看到预览、再明确说一句"确认"才会发生。
+即使 LLM 完全无视 system prompt 直接调 `uninstall_flatpak(confirm=true)`，
+Executor 也会拒绝 —— LLM 绕不过去。
+
+工具内的额外加固：
+
+- **`close_game`** 拒绝任何长度小于 3 的 `process_name`，以及包含黑名单子串
+  （`steam`、`systemd`、`kwin`、`plasma`、`sshd`、`python` 等）的输入。
+  防止 LLM 出错把整个桌面会话杀掉。
 
 ## 示例对话
 

@@ -223,19 +223,28 @@ uv run python main.py
 | Macro | `press_key`, `start_key_loop`, `stop_all_macros` | no |
 | Meta | `final_answer` | — |
 
-### Two-step confirmation
+### Runtime permission gate
 
-Any tool that installs or uninstalls software accepts a `confirm: bool`
-argument. The agent always calls it twice:
+The Executor (`runtime/executor.py`) enforces a permission gate **in
+Python** before each tool runs — independent of, and stronger than, the
+system-prompt rules. Three risk classes:
 
-1. **Preview turn** — `confirm=false`: the tool reports what *would*
-   happen (app id, disk size, etc.) and the agent asks the user to
-   approve.
-2. **Execution turn** — on the user's "yes/确认" reply, the agent calls
-   the same tool with `confirm=true`.
+| Class | Behavior | Tools |
+|---|---|---|
+| `safe` | runs silently | get_*, list_*, search_*, disk_usage, final_answer |
+| `side_effect` | prompts `[y / n / a]` (a = allow this tool for the rest of the session) | set_volume, press_key, start_key_loop, stop_all_macros, launch_game, close_game |
+| `destructive` | **blocked unless** a matching `confirm=false` dry-run was seen first, AND the user types `y` at a second prompt | install_*, uninstall_* |
 
-This makes it impossible for the agent to silently wipe an app — the
-user always sees a preview and types an explicit confirmation first.
+Even if the LLM ignores the system prompt and calls
+`uninstall_flatpak(confirm=true)` straight away, the Executor refuses —
+the LLM cannot bypass this in Python.
+
+Extra hardening inside individual tools:
+
+- **`close_game`** rejects any `process_name` shorter than 3 chars or
+  containing a denylisted substring (`steam`, `systemd`, `kwin`,
+  `plasma`, `sshd`, `python`, …). Prevents an LLM slip from killing the
+  desktop session.
 
 ## Example session
 

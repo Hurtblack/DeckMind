@@ -53,20 +53,46 @@ async def launch_game(game_name: str) -> dict[str, Any]:
     return {"ok": True, "game": key, "app_id": app_id, "pid": proc.pid}
 
 
+# Substrings we refuse to pkill — killing any of these would brick the
+# session or the desktop. Matched case-insensitively against process_name.
+_CLOSE_GAME_DENYLIST: tuple[str, ...] = (
+    "steam", "systemd", "pulseaudio", "pipewire", "wpctl",
+    "kwin", "plasma", "kded", "konsole", "xorg", "wayland", "gamescope",
+    "sshd", "bash", "zsh", "python", "init", "kernel",
+    "dbus", "polkit", "udev", "networkmanager",
+)
+
+
 async def close_game(process_name: str) -> dict[str, Any]:
-    """Kill a running game by process name using `pkill`."""
+    """Kill a running game by process name using `pkill -f`.
+
+    Refuses obviously dangerous inputs (too short, or containing a
+    denylisted substring) so an LLM mistake can't kill the desktop.
+    """
     if not shutil.which("pkill"):
         return {"ok": False, "error": "pkill not available on this system"}
 
+    name = (process_name or "").strip()
+    if len(name) < 3:
+        return {"ok": False, "denied": True,
+                "reason": "process_name too short (min 3 chars) — refuse to pkill"}
+
+    lower = name.lower()
+    for bad in _CLOSE_GAME_DENYLIST:
+        if bad in lower:
+            return {"ok": False, "denied": True,
+                    "reason": f"refused: process_name contains denylisted "
+                              f"substring {bad!r} (would kill a system process)"}
+
     proc = await asyncio.create_subprocess_exec(
-        "pkill", "-f", process_name,
+        "pkill", "-f", name,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
     await proc.communicate()
     # pkill exits 0 if it killed something, 1 if nothing matched.
     return {"ok": proc.returncode in (0, 1), "killed": proc.returncode == 0,
-            "process": process_name}
+            "process": name}
 
 
 async def install_game(game_name: str, confirm: bool = False) -> dict[str, Any]:
