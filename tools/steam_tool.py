@@ -66,23 +66,38 @@ _CLOSE_GAME_DENYLIST: tuple[str, ...] = (
 async def close_game(process_name: str) -> dict[str, Any]:
     """Kill a running game by process name using `pkill -f`.
 
-    Refuses obviously dangerous inputs (too short, or containing a
-    denylisted substring) so an LLM mistake can't kill the desktop.
+    Dangerous inputs (too short, or containing a denylisted substring)
+    trigger an extra warning prompt — the user can still approve. We
+    never refuse outright.
     """
     if not shutil.which("pkill"):
         return {"ok": False, "error": "pkill not available on this system"}
 
+    # Local import to avoid a top-level dependency on the runtime package.
+    from runtime.prompt import ask, is_yes
+
     name = (process_name or "").strip()
+
     if len(name) < 3:
-        return {"ok": False, "denied": True,
-                "reason": "process_name too short (min 3 chars) — refuse to pkill"}
+        ans = await ask(
+            f"    ⚠ very short process_name {name!r} — pkill -f will match "
+            f"a LOT of processes. Continue? [y/n] > "
+        )
+        if not is_yes(ans):
+            return {"ok": False, "denied": True,
+                    "reason": "user declined short process_name"}
 
     lower = name.lower()
     for bad in _CLOSE_GAME_DENYLIST:
         if bad in lower:
-            return {"ok": False, "denied": True,
-                    "reason": f"refused: process_name contains denylisted "
-                              f"substring {bad!r} (would kill a system process)"}
+            ans = await ask(
+                f"    🚨 process_name contains {bad!r} — this may kill a "
+                f"system process and break your session. Continue? [y/n] > "
+            )
+            if not is_yes(ans):
+                return {"ok": False, "denied": True,
+                        "reason": f"user declined denylisted match on {bad!r}"}
+            break  # one warning is enough — don't pile prompts
 
     proc = await asyncio.create_subprocess_exec(
         "pkill", "-f", name,

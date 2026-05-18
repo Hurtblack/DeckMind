@@ -1,28 +1,32 @@
-"""Executor: dispatches tool calls + enforces runtime permissions.
+"""Executor: dispatches tool calls + asks the user when a call is risky.
 
-The permission gate runs in Python BEFORE the tool is awaited, so the
-LLM cannot bypass it by ignoring the system prompt. Three risk classes:
+Policy: never silently refuse. Whenever a call looks dangerous, the
+Executor asks the user — the user always has final say.
 
-  - safe         : read-only ops (get/list/search). Pass through silently.
-  - side_effect  : prompt user with [y/n/a] before every call.
+Three risk classes:
+
+  - safe         : read-only ops. Pass through silently.
+  - side_effect  : ask [y/n/a] before each call.
                    `a` = allow this tool for the rest of the session.
-  - destructive  : two-gate check.
-                   1. confirm=false acts as a dry-run; we record (name, key).
-                   2. confirm=true is refused unless we saw a matching
-                      dry-run AND the user explicitly types `y`.
+  - destructive  : recommended path is dry-run (confirm=false) then
+                   confirm=true. The Executor asks the user before
+                   running confirm=true. If the LLM skips the dry-run
+                   and calls confirm=true directly, the user gets a
+                   stronger warning prompt — but can still approve.
 
 Unknown tools are treated as destructive.
 
-A separate per-tool input validation (e.g. close_game's denylist) lives
-inside each tool — this Executor only does the generic gating.
+A separate per-tool input check (e.g. close_game's denylist) lives
+inside each tool — also as a warning prompt, never a hard refusal.
 """
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from tools import get as get_tool
+
+from .prompt import ask, is_yes
 
 
 # ---------- risk classification ----------
@@ -53,8 +57,8 @@ RISK_DESTRUCTIVE: set[str] = {
     "uninstall_flatpak",
 }
 
-# For destructive tools, which argument uniquely identifies the target.
-# Used to match a confirm=true call against an earlier dry-run.
+# For destructive tools, the argument that identifies the target. Used
+# to match a confirm=true call against an earlier dry-run preview.
 DESTRUCTIVE_KEY: dict[str, str] = {
     "install_game": "game_name",
     "uninstall_game": "game_name",
@@ -77,19 +81,14 @@ def _risk_of(name: str) -> str:
 # ---------- the executor ----------
 
 class Executor:
-    """Dispatches tool calls and enforces the permission gate."""
+    """Dispatches tool calls and asks the user before risky ones."""
 
     def __init__(self) -> None:
         # Side-effect tools the user white-listed for this session.
         self._allow_all: set[str] = set()
-        # (tool_name, key) pairs already dry-run in this session.
+        # (tool_name, key) pairs already dry-run in this session — used
+        # to decide whether a confirm=true call had a recent preview.
         self._dry_run_seen: set[tuple[str, str]] = set()
-
-    async def _ask(self, prompt: str) -> str:
-        """Read one line from the user without blocking the event loop."""
-        loop = asyncio.get_running_loop()
-        text = await loop.run_in_executor(None, lambda: input(prompt))
-        return text.strip().lower()
 
     async def run(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Gate + dispatch one tool call."""
@@ -97,21 +96,22 @@ class Executor:
         if fn is None:
             return {"ok": False, "error": f"unknown tool '{name}'"}
 
-        # ----- permission gate -----
         risk = _risk_of(name)
 
+        # ----- permission gate -----
+
         if risk == "safe":
-            pass  # no prompt; always allowed
+            pass  # read-only — no prompt
 
         elif risk == "side_effect":
             if name not in self._allow_all:
-                ans = await self._ask(
+                ans = await ask(
                     f"    ⚠ side-effect: {name}({arguments})  "
                     f"[y=允许 / n=拒绝 / a=本会话此工具全允许] > "
                 )
                 if ans == "a":
                     self._allow_all.add(name)
-                elif ans not in {"y", "yes", ""}:
+                elif not (is_yes(ans) or ans == ""):
                     return {"ok": False, "denied": True,
                             "reason": f"user rejected side-effect call to {name}"}
 
@@ -121,25 +121,22 @@ class Executor:
             confirm = bool(arguments.get("confirm", False))
 
             if not confirm:
-                # Dry-run path: harmless, just remember it so a follow-up
-                # confirm=true call is allowed to proceed to its own prompt.
+                # Dry-run path: harmless. Remember it so a later
+                # confirm=true call is recognized as "previewed first".
                 self._dry_run_seen.add((name, target))
             else:
-                # Real-execution path: refuse if we never saw a dry-run for
-                # this exact (tool, target). This blocks the LLM from
-                # jumping straight to confirm=true.
-                if (name, target) not in self._dry_run_seen:
-                    return {"ok": False, "denied": True,
-                            "reason": (
-                                f"refused: {name}(confirm=true) without a "
-                                f"prior dry-run for {key_arg}={target!r}. "
-                                "Call with confirm=false first."
-                            )}
-                ans = await self._ask(
-                    f"    🚨 DESTRUCTIVE: {name}({arguments})  "
-                    f"[y=确认执行 / n=取消] > "
-                )
-                if ans not in {"y", "yes"}:
+                # Real execution. Decide which warning to use based on
+                # whether the LLM did a dry-run first.
+                if (name, target) in self._dry_run_seen:
+                    prompt = (f"    🚨 DESTRUCTIVE: {name}({arguments})  "
+                              f"[y=确认执行 / n=取消] > ")
+                else:
+                    prompt = (f"    🚨 DESTRUCTIVE (NO DRY-RUN!): "
+                              f"{name}({arguments})  "
+                              f"LLM skipped the preview step — please double-check. "
+                              f"[y=确认执行 / n=取消] > ")
+                ans = await ask(prompt)
+                if not is_yes(ans):
                     return {"ok": False, "denied": True,
                             "reason": f"user rejected destructive call to {name}"}
 
@@ -147,8 +144,8 @@ class Executor:
         try:
             return await fn(**arguments)
         except TypeError as e:
-            # Wrong/missing args — common LLM mistake. Report cleanly so the
-            # planner can correct itself on the next turn.
+            # Wrong/missing args — common LLM mistake. Report cleanly so
+            # the planner can correct itself on the next turn.
             return {"ok": False, "error": f"bad arguments for {name}: {e}"}
         except Exception as e:  # pragma: no cover — defensive
             return {"ok": False, "error": f"{type(e).__name__}: {e}"}

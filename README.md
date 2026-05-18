@@ -233,18 +233,18 @@ system-prompt rules. Three risk classes:
 |---|---|---|
 | `safe` | runs silently | get_*, list_*, search_*, disk_usage, final_answer |
 | `side_effect` | prompts `[y / n / a]` (a = allow this tool for the rest of the session) | set_volume, press_key, start_key_loop, stop_all_macros, launch_game, close_game |
-| `destructive` | **blocked unless** a matching `confirm=false` dry-run was seen first, AND the user types `y` at a second prompt | install_*, uninstall_* |
+| `destructive` | always prompts before executing. If the LLM skipped the recommended `confirm=false` dry-run first, the prompt switches to a **stronger warning** so you know the preview step was skipped. | install_*, uninstall_* |
 
-Even if the LLM ignores the system prompt and calls
-`uninstall_flatpak(confirm=true)` straight away, the Executor refuses —
-the LLM cannot bypass this in Python.
+The gate **never refuses silently** — every risky call asks you. The
+user always has the final word.
 
 Extra hardening inside individual tools:
 
-- **`close_game`** rejects any `process_name` shorter than 3 chars or
-  containing a denylisted substring (`steam`, `systemd`, `kwin`,
-  `plasma`, `sshd`, `python`, …). Prevents an LLM slip from killing the
-  desktop session.
+- **`close_game`** issues an additional warning prompt if the
+  `process_name` is shorter than 3 chars (would match too many
+  processes) or contains a denylisted substring (`steam`, `systemd`,
+  `kwin`, `plasma`, `sshd`, `python`, …). You can still approve and
+  proceed — it's a warning, not a block.
 
 ## Example session
 

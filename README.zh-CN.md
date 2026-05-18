@@ -226,16 +226,15 @@ uv run python main.py
 |---|---|---|
 | `safe`（安全） | 静默放行 | get_*、list_*、search_*、disk_usage、final_answer |
 | `side_effect`（副作用） | 弹 `[y=允许 / n=拒绝 / a=本工具本会话全允许]` | set_volume、press_key、start_key_loop、stop_all_macros、launch_game、close_game |
-| `destructive`（破坏性） | **必须**先有匹配的 `confirm=false` dry-run 在前，**并且**用户在第二次提示里输 `y` 才会执行 | install_*、uninstall_* |
+| `destructive`（破坏性） | 永远在执行前询问用户。如果 LLM 跳过了推荐的 `confirm=false` dry-run 直接 confirm=true，会弹**加强版警告**告诉你预览被跳过了 | install_*、uninstall_* |
 
-即使 LLM 完全无视 system prompt 直接调 `uninstall_flatpak(confirm=true)`，
-Executor 也会拒绝 —— LLM 绕不过去。
+闸门**从不静默拒绝** —— 每个有风险的调用都会问你，最终决定权永远在你手里。
 
 工具内的额外加固：
 
-- **`close_game`** 拒绝任何长度小于 3 的 `process_name`，以及包含黑名单子串
-  （`steam`、`systemd`、`kwin`、`plasma`、`sshd`、`python` 等）的输入。
-  防止 LLM 出错把整个桌面会话杀掉。
+- **`close_game`** 如果 `process_name` 长度不到 3 个字符（会匹配太多进程），
+  或包含黑名单子串（`steam`、`systemd`、`kwin`、`plasma`、`sshd`、`python` 等），
+  会**额外弹一个警告询问** —— 你仍然可以同意继续，这只是警告不是拦截。
 
 ## 示例对话
 
