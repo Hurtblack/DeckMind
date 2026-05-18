@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.Python
+
+# Virtualenvs / uv
+.venv/
+venv/
+.uv/
+
+# uv lock file — keep this if you want reproducible installs across machines.
+# Comment the next line out if you'd rather commit it.
+# uv.lock
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Local env files (NEVER commit API keys)
+.env
+.env.local
+*.local
+
+# Logs / runtime
+*.log

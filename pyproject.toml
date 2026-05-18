@@ -1,0 +1,9 @@
+[project]
+name = "steamdeck-agent"
+version = "0.1.0"
+description = "Minimal local LLM agent for Steam Deck / Linux."
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.51.0",
+    "pynput>=1.7.7",
+]
