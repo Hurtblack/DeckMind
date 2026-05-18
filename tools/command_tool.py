@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,6 +75,7 @@ _SHELL_META_TOKENS: tuple[str, ...] = (
 
 _SIMPLE_COMMAND_RE = re.compile(r"^[A-Za-z0-9._+-]+$")
 _SYSTEMD_UNIT_RE = re.compile(r"^[A-Za-z0-9_.@-]+\.service$")
+_TRUSTED_PATH = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
 
 
 def _reject(argv: list[str], reason: str, command: str | None = None) -> ValidationResult:
@@ -107,6 +109,22 @@ def _has_sensitive_fragment(value: str) -> bool:
 
 def _contains_shell_metacharacter(argv: list[str]) -> bool:
     return any(any(token in arg for token in _SHELL_META_TOKENS) for arg in argv)
+
+
+def _resolve_executable(command: str) -> tuple[str | None, str | None]:
+    executable = shutil.which(command, path=_TRUSTED_PATH)
+    if executable is None:
+        return None, f"allowlisted command not found in trusted path: {command}"
+
+    resolved = Path(executable).resolve(strict=False)
+    home = Path.home().resolve(strict=False)
+    cwd = Path.cwd().resolve(strict=False)
+    if _is_under(resolved, home) or resolved == home:
+        return None, f"allowlisted command not found in trusted path: {command}"
+    if _is_under(resolved, cwd) or resolved == cwd:
+        return None, f"allowlisted command not found in trusted path: {command}"
+
+    return str(resolved), None
 
 
 def _validate_url(url: str) -> str | None:
@@ -179,23 +197,35 @@ def validate_command(argv: list[str]) -> ValidationResult:
         return _reject(argv, "shell metacharacter or compound command is not allowed")
 
     command = argv[0]
+    if "/" in command:
+        return _reject(argv, "command must be an allowlisted executable name", command=command)
 
     if command == "curl":
-        return _validate_curl(argv)
-    if command == "wget":
-        return _validate_wget(argv)
-    if command == "chmod":
-        return _validate_chmod(argv)
-    if command == "mkdir":
-        return _validate_mkdir(argv)
-    if command == "file":
-        return _validate_file(argv)
-    if command == "which":
-        return _validate_which(argv)
-    if command == "systemctl":
-        return _validate_systemctl(argv)
+        validation = _validate_curl(argv)
+    elif command == "wget":
+        validation = _validate_wget(argv)
+    elif command == "chmod":
+        validation = _validate_chmod(argv)
+    elif command == "mkdir":
+        validation = _validate_mkdir(argv)
+    elif command == "file":
+        validation = _validate_file(argv)
+    elif command == "which":
+        validation = _validate_which(argv)
+    elif command == "systemctl":
+        validation = _validate_systemctl(argv)
+    else:
+        return _reject(argv, f"unsupported command: {command}", command=command)
 
-    return _reject(argv, f"unsupported command: {command}", command=command)
+    if not validation.ok:
+        return validation
+
+    executable, reason = _resolve_executable(command)
+    if reason:
+        return _reject(argv, reason, command=command)
+
+    validation.argv[0] = executable or validation.argv[0]
+    return validation
 
 
 def _validate_curl(argv: list[str]) -> ValidationResult:
@@ -352,19 +382,13 @@ async def run_command(argv: list[str], confirm: bool = False) -> dict[str, Any]:
 async def _execute_validated(validation: ValidationResult) -> dict[str, Any]:
     """Execute a validated command without using a shell."""
     started = time.monotonic()
-    proc = await asyncio.create_subprocess_exec(
-        *validation.argv,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    communicate = proc.communicate()
     try:
-        stdout, stderr = await asyncio.wait_for(communicate, timeout=60)
-    except asyncio.TimeoutError:
-        if hasattr(communicate, "close"):
-            communicate.close()
-        proc.kill()
-        await proc.wait()
+        proc = await asyncio.create_subprocess_exec(
+            *validation.argv,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except OSError as exc:
         elapsed = time.monotonic() - started
         return {
             "ok": False,
@@ -373,6 +397,50 @@ async def _execute_validated(validation: ValidationResult) -> dict[str, Any]:
             "returncode": -1,
             "stdout_tail": "",
             "stderr_tail": "",
+            "elapsed_seconds": elapsed,
+            "output_size_bytes": None,
+            "read_only": validation.read_only,
+            "output_path": validation.output_path,
+            "error": f"failed to start command: {exc}",
+        }
+
+    communicate = proc.communicate()
+    try:
+        stdout, stderr = await asyncio.wait_for(communicate, timeout=60)
+    except asyncio.TimeoutError:
+        if hasattr(communicate, "close"):
+            communicate.close()
+        stdout = b""
+        stderr = b""
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            stdout, stderr = await proc.communicate()
+        except Exception as exc:
+            elapsed = time.monotonic() - started
+            return {
+                "ok": False,
+                "argv": validation.argv,
+                "command": validation.command,
+                "returncode": proc.returncode if proc.returncode is not None else -1,
+                "stdout_tail": stdout.decode(errors="replace")[-4000:],
+                "stderr_tail": stderr.decode(errors="replace")[-4000:],
+                "elapsed_seconds": elapsed,
+                "output_size_bytes": None,
+                "read_only": validation.read_only,
+                "output_path": validation.output_path,
+                "error": f"command timed out after 60 seconds; failed to drain output: {exc}",
+            }
+        elapsed = time.monotonic() - started
+        return {
+            "ok": False,
+            "argv": validation.argv,
+            "command": validation.command,
+            "returncode": proc.returncode if proc.returncode is not None else -1,
+            "stdout_tail": stdout.decode(errors="replace")[-4000:],
+            "stderr_tail": stderr.decode(errors="replace")[-4000:],
             "elapsed_seconds": elapsed,
             "output_size_bytes": None,
             "read_only": validation.read_only,

@@ -39,6 +39,13 @@ class CommandToolValidationTests(unittest.TestCase):
         self.assertEqual(result.command, "curl")
         self.assertFalse(result.read_only)
 
+    def test_which_argv_uses_trusted_absolute_executable(self) -> None:
+        result = validate_command(["which", "sh"])
+
+        self.assertTrue(result.ok)
+        self.assertNotEqual(result.argv[0], "which")
+        self.assertTrue(Path(result.argv[0]).is_absolute())
+
     def test_curl_download_argv_uses_expanded_output_path(self) -> None:
         result = validate_command([
             "curl",
@@ -49,6 +56,8 @@ class CommandToolValidationTests(unittest.TestCase):
         ])
 
         self.assertTrue(result.ok)
+        self.assertNotEqual(result.argv[0], "curl")
+        self.assertTrue(Path(result.argv[0]).is_absolute())
         self.assertEqual(
             result.argv[3],
             str((Path.home() / "Downloads" / "Clash.Verge.AppImage").resolve(strict=False)),
@@ -81,6 +90,17 @@ class CommandToolValidationTests(unittest.TestCase):
 
         self.assertFalse(result.ok)
         self.assertIn("shell metacharacter", result.reason or "")
+
+    def test_rejects_missing_allowlisted_command(self) -> None:
+        from unittest.mock import patch
+
+        module = load_command_tool()
+
+        with patch("shutil.which", return_value=None):
+            result = module.validate_command(["which", "sh"])
+
+        self.assertFalse(result.ok)
+        self.assertIn("allowlisted command not found", result.reason or "")
 
     def test_rejects_writes_outside_allowed_dirs(self) -> None:
         result = validate_command([
@@ -160,15 +180,20 @@ class CommandToolValidationTests(unittest.TestCase):
         self.assertIn("systemctl --user", result.reason or "")
 
     def test_allows_user_systemctl_status(self) -> None:
-        result = validate_command([
-            "systemctl",
-            "--user",
-            "status",
-            "deckmind-agent.service",
-        ])
+        from unittest.mock import patch
+
+        module = load_command_tool()
+        with patch("shutil.which", return_value="/usr/bin/systemctl"):
+            result = module.validate_command([
+                "systemctl",
+                "--user",
+                "status",
+                "deckmind-agent.service",
+            ])
 
         self.assertTrue(result.ok)
         self.assertTrue(result.read_only)
+        self.assertEqual(result.argv[0], "/usr/bin/systemctl")
 
     def test_rejects_credential_like_url(self) -> None:
         result = validate_command([
@@ -195,7 +220,7 @@ class CommandToolValidationTests(unittest.TestCase):
                 return b"", b""
 
             def kill(self) -> None:
-                self.returncode = -9
+                return None
 
             async def wait(self) -> None:
                 return None
@@ -215,6 +240,23 @@ class CommandToolValidationTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(result["returncode"], -1)
         self.assertIn("timed out after 60 seconds", result["error"])
+
+    def test_execute_validated_returns_structured_startup_failure(self) -> None:
+        import asyncio
+
+        module = load_command_tool()
+        validation = module.ValidationResult(
+            True,
+            ["/definitely/missing"],
+            command="which",
+            read_only=True,
+        )
+
+        result = asyncio.run(module._execute_validated(validation))
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["command"], "which")
+        self.assertIn("failed to start command", result["error"])
 
 
 if __name__ == "__main__":
