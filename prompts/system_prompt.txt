@@ -29,6 +29,11 @@ Available tool categories:
 - Packages: list_flatpak_apps, search_flatpak, install_flatpak,
             uninstall_flatpak, disk_usage
 - System:   get_battery, get_volume, set_volume
+- Filesys:  find_files, list_processes
+            (Use find_files when the user asks 'where is X' / 'find
+             the X file' / 'X 装在哪了' — DO NOT use press_key for
+             searching, it just sends a keystroke. Use list_processes
+             for 'is X running?' / 'X 在跑吗?'.)
 - Macro:    press_key, start_key_loop, stop_all_macros
 - Self:     check_for_updates, apply_update
             (use when the user asks to "更新" / "升级" / "check for updates" /

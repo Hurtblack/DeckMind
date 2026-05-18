@@ -36,6 +36,9 @@ RISK_SAFE: set[str] = {
     "search_flatpak",
     "disk_usage",
     "check_for_updates",
+    # Filesystem queries — read-only wrappers around `find` and `ps`.
+    "find_files",
+    "list_processes",
     # Profile read/write: only touches a small user-owned JSON file.
     # Prompting before every "记住我叫 X" would ruin the conversation.
     "remember",

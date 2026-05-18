@@ -15,7 +15,7 @@ from typing import Any, Awaitable, Callable
 from llm import ToolSpec
 
 from . import (
-    macro_tool, notion_tool, package_tool, profile_tool,
+    file_tool, macro_tool, notion_tool, package_tool, profile_tool,
     steam_tool, system_tool, update_tool,
 )
 
@@ -163,6 +163,54 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
             name="disk_usage",
             description="Show human-readable disk usage for / and /home.",
             parameters={"type": "object", "properties": {}},
+        ),
+    ),
+    "find_files": (
+        file_tool.find_files,
+        ToolSpec(
+            name="find_files",
+            description=(
+                "Search for files by glob pattern under a directory. Use "
+                "when the user asks 'where is X' / 'find the X file' / "
+                "'X 装在哪了'. Skips noisy paths (caches, trash, .git, "
+                "node_modules). Case-insensitive by default. Examples: "
+                "find_files('*clash*verge*'); "
+                "find_files('*.AppImage', '~/Downloads'); "
+                "find_files('config.toml', '~/.config', max_depth=3)."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string",
+                                "description": "Glob, e.g. '*clash*' or '*.desktop'"},
+                    "base_dir": {"type": "string", "default": "~",
+                                 "description": "Directory to search from (~ ok)"},
+                    "max_depth": {"type": "integer", "default": 6},
+                    "max_results": {"type": "integer", "default": 30},
+                    "case_insensitive": {"type": "boolean", "default": True},
+                },
+                "required": ["pattern"],
+            },
+        ),
+    ),
+    "list_processes": (
+        file_tool.list_processes,
+        ToolSpec(
+            name="list_processes",
+            description=(
+                "List running processes, optionally filtered by substring "
+                "(case-insensitive, matches command + args). Use to answer "
+                "'is X running?' / 'X 在跑吗?' / 'kill 哪个 pid'. Caps "
+                "results so the LLM context stays manageable."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "filter": {"type": "string",
+                               "description": "Optional substring filter"},
+                    "limit": {"type": "integer", "default": 30},
+                },
+            },
         ),
     ),
     "remember": (
