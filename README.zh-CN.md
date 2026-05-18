@@ -33,19 +33,33 @@
 
 ## 通用安装（任何 Linux / macOS 开发机）
 
-依赖：Python 3.11+ 和 [uv](https://docs.astral.sh/uv/)。
+依赖：Python 3.11+。
 
 ```bash
 git clone https://github.com/Hurtblack/DeckMind.git
 cd DeckMind
-uv sync                                # 自动建虚拟环境并装依赖
-# 或者：uv pip install -r requirements.txt
+./install.sh                 # 自动装 uv + 依赖 + 设置 deckmind 命令
+                             # 交互式问你 LLM API key（输入不回显）
 ```
+
+之后新开终端跑 `deckmind` 就完事。脚本幂等，随时可重跑。
+要全手动的话看下面 Steam Deck 那段拆解步骤。
 
 ## 在 Steam Deck 上安装
 
 > ⚠️ 在**桌面模式**（KDE）下安装；跑通之后再用"非 Steam 游戏"的方式加进库，
 > 这样在游戏模式也能启动。
+
+**TL;DR 极速路径**：在 Konsole 里跑：
+
+```bash
+passwd                                                       # 首次必须，设 sudo 密码
+cd ~ && git clone https://github.com/Hurtblack/DeckMind.git
+cd ~/DeckMind && ./install.sh                                # 剩下全自动
+```
+
+新开一个 Konsole 窗口，输 `deckmind` 就跑起来了。下面那一长串手动步骤
+其实就是 `install.sh` 干的事情拆开讲。
 
 ### 1. 切到桌面模式
 

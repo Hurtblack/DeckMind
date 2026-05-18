@@ -32,19 +32,34 @@ Built to be small enough to read in one sitting — the whole loop is in
 
 ## Install (any Linux / macOS dev machine)
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.11+.
 
 ```bash
 git clone https://github.com/Hurtblack/DeckMind.git
 cd DeckMind
-uv sync                                # creates .venv, installs deps
-# Or: uv pip install -r requirements.txt
+./install.sh                 # installs uv + deps, sets up `deckmind` cmd,
+                             # asks for your LLM API key (input hidden)
 ```
+
+Open a new terminal and run `deckmind`. The installer is idempotent —
+re-run any time. If you'd rather do every step manually, see the
+Steam Deck instructions below.
 
 ## Install on a Steam Deck
 
 > ⚠️ Install in **Desktop Mode** (KDE). Once it works, add it as a
 > non-Steam game so you can launch it from Game Mode too.
+
+**TL;DR fast path:** in Konsole, run:
+
+```bash
+passwd                                                          # one-time, set a sudo password
+cd ~ && git clone https://github.com/Hurtblack/DeckMind.git
+cd ~/DeckMind && ./install.sh                                   # everything else
+```
+
+Open a new Konsole window, type `deckmind`, done. The manual step-by-step
+below explains what `install.sh` actually does.
 
 ### 1. Switch to Desktop Mode
 
