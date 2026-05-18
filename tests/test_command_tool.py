@@ -21,7 +21,8 @@ def load_command_tool():
     return module
 
 
-validate_command = load_command_tool().validate_command
+def validate_command(argv: list[str]):
+    return load_command_tool().validate_command(argv)
 
 
 class CommandToolValidationTests(unittest.TestCase):
