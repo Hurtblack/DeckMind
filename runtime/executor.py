@@ -108,13 +108,19 @@ class Executor:
         elif risk == "destructive":
             confirm = bool(arguments.get("confirm", False))
             if confirm:
-                ans = await ask(
-                    f"    🚨 DESTRUCTIVE: {name}({arguments})  "
-                    f"[y=确认执行 / n=取消] > "
-                )
-                if not is_yes(ans):
-                    return {"ok": False, "denied": True,
-                            "reason": f"user rejected destructive call to {name}"}
+                # `a` from a previous turn pre-approves this tool, so we
+                # don't pester the user mid-batch (e.g. uninstalling
+                # several flatpaks in a row).
+                if name not in self._allow_all:
+                    ans = await ask(
+                        f"    🚨 DESTRUCTIVE: {name}({arguments})  "
+                        f"[y=确认执行 / n=取消 / a=本会话此工具全允许] > "
+                    )
+                    if ans == "a":
+                        self._allow_all.add(name)
+                    elif not is_yes(ans):
+                        return {"ok": False, "denied": True,
+                                "reason": f"user rejected destructive call to {name}"}
             # confirm=False is a dry-run — harmless, pass through silently.
 
         # ----- execute -----

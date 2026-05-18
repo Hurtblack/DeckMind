@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 
 from llm import HistoryItem, make_client
 from memory import SessionMemory
@@ -79,6 +80,9 @@ class Agent:
 
     async def handle(self, user_text: str) -> str:
         """Run one user turn end-to-end. Returns the assistant's full reply."""
+        # monotonic so we measure pure elapsed time even if the system
+        # clock jumps (NTP sync, daylight savings, etc.).
+        turn_start = time.monotonic()
         self.memory.add_user(user_text)
 
         # `history` is the rolling input we feed back into the model
@@ -154,9 +158,11 @@ class Agent:
         # separators and Chinese labels so the meaning is obvious.
         self.total_input_tokens += turn_input
         self.total_output_tokens += turn_output
+        elapsed = time.monotonic() - turn_start
         if turn_input or turn_output:
             print(ui.footer(
-                f"  ↳ 本轮 提示 {turn_input:,} + 回复 {turn_output:,} tokens"
+                f"  ↳ 耗时 {elapsed:.1f}s"
+                f"  ·  本轮 提示 {turn_input:,} + 回复 {turn_output:,} tokens"
                 f"  ·  累计 提示 {self.total_input_tokens:,} + 回复 {self.total_output_tokens:,}"
                 f"  ·  模型 {self.model}"
             ))
