@@ -8,7 +8,14 @@ from __future__ import annotations
 
 import os
 
-from .base import HistoryItem, LLMClient, PlannedCall, ToolSpec
+from .base import (
+    HistoryItem,
+    LLMClient,
+    PlanResult,
+    PlannedCall,
+    TextDeltaCallback,
+    ToolSpec,
+)
 from .chat_completions_client import ChatCompletionsClient
 from .openai_client import OpenAIResponsesClient
 
@@ -87,6 +94,7 @@ def make_client() -> LLMClient:
 
 
 __all__ = [
-    "HistoryItem", "LLMClient", "PlannedCall", "ToolSpec",
+    "HistoryItem", "LLMClient", "PlanResult", "PlannedCall",
+    "TextDeltaCallback", "ToolSpec",
     "make_client", "PROVIDERS",
 ]

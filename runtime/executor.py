@@ -35,7 +35,6 @@ RISK_SAFE: set[str] = {
     "list_flatpak_apps",
     "search_flatpak",
     "disk_usage",
-    "final_answer",
 }
 
 RISK_SIDE_EFFECT: set[str] = {

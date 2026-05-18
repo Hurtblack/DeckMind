@@ -28,16 +28,50 @@ def _has_steam() -> bool:
     return shutil.which("steam") is not None
 
 
+def _resolve_app_id(game_name: str) -> tuple[str | None, str | None]:
+    """Map a game name to (app_id, resolved_name).
+
+    Tries (in order): built-in aliases, exact match against installed
+    Steam library, substring match against installed library.
+    """
+    key = game_name.strip().lower()
+    if not key:
+        return None, None
+
+    if key in _GAME_REGISTRY:
+        return _GAME_REGISTRY[key], key
+
+    # Local import to avoid a hard dependency cycle and to keep the
+    # scanner cost only when actually needed.
+    from runtime.context import scan_steam_library
+    library = scan_steam_library()
+
+    # Exact name match (case-insensitive).
+    for g in library:
+        if g["name"].lower() == key:
+            return g["appid"], g["name"]
+    # Substring match — "elden" -> "Elden Ring".
+    for g in library:
+        if key in g["name"].lower():
+            return g["appid"], g["name"]
+
+    return None, None
+
+
 async def launch_game(game_name: str) -> dict[str, Any]:
     """Launch a game by friendly name.
 
-    Uses Steam's URI scheme when available, otherwise returns a mock result.
+    Resolves the name via built-in aliases first, then the locally
+    installed Steam library. Uses Steam's URI scheme when available,
+    otherwise returns a mock result.
     """
-    key = game_name.strip().lower()
-    app_id = _GAME_REGISTRY.get(key)
-
+    app_id, resolved = _resolve_app_id(game_name)
     if app_id is None:
-        return {"ok": False, "error": f"Unknown game '{game_name}'. Known: {list(_GAME_REGISTRY)}"}
+        return {"ok": False,
+                "error": f"Unknown game '{game_name}'. Not in the built-in "
+                         f"alias list and not found in your installed Steam "
+                         f"library. Try a more specific name or install it first."}
+    key = resolved or game_name.strip().lower()
 
     if not _has_steam():
         # Mock branch — useful on macOS / CI / dev machines.

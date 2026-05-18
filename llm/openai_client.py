@@ -1,4 +1,4 @@
-"""OpenAI Responses API client.
+"""OpenAI Responses API client — streams text deltas to a callback.
 
 Used when LLM_PROVIDER=openai (the default).
 """
@@ -11,11 +11,18 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from .base import HistoryItem, LLMClient, PlannedCall, ToolSpec
+from .base import (
+    HistoryItem,
+    LLMClient,
+    PlanResult,
+    PlannedCall,
+    TextDeltaCallback,
+    ToolSpec,
+)
 
 
 class OpenAIResponsesClient(LLMClient):
-    """Thin async wrapper over `client.responses.create`."""
+    """Async wrapper over `client.responses.stream`."""
 
     def __init__(self, model: str | None = None) -> None:
         # AsyncOpenAI reads OPENAI_API_KEY (+ optional OPENAI_BASE_URL) from env.
@@ -64,15 +71,27 @@ class OpenAIResponsesClient(LLMClient):
         system_prompt: str,
         history: list[HistoryItem],
         tools: list[ToolSpec],
-    ) -> list[PlannedCall]:
-        response = await self.client.responses.create(
+        on_text_delta: TextDeltaCallback | None = None,
+    ) -> PlanResult:
+        text_parts: list[str] = []
+
+        # Streaming context: we get events for text deltas in real time,
+        # while function_call items only show up complete in `output`
+        # at the end.
+        async with self.client.responses.stream(
             model=self.model,
             instructions=system_prompt,
             input=self._to_input(history),
             tools=self._to_tools(tools),
             tool_choice="auto",
             parallel_tool_calls=False,
-        )
+        ) as stream:
+            async for event in stream:
+                if event.type == "response.output_text.delta":
+                    text_parts.append(event.delta)
+                    if on_text_delta is not None:
+                        on_text_delta(event.delta)
+            response = await stream.get_final_response()
 
         calls: list[PlannedCall] = []
         for item in response.output:
@@ -83,4 +102,5 @@ class OpenAIResponsesClient(LLMClient):
                 arguments=json.loads(item.arguments or "{}"),
                 call_id=item.call_id,
             ))
-        return calls
+
+        return PlanResult(text="".join(text_parts), tool_calls=calls)

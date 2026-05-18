@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 
 @dataclass
@@ -18,6 +18,20 @@ class PlannedCall:
     name: str
     arguments: dict[str, Any]
     call_id: str   # opaque id used to correlate the tool result later
+
+
+@dataclass
+class PlanResult:
+    """Output of one LLM step.
+
+    `text` is the natural-language reply (possibly streamed). When
+    `tool_calls` is empty, `text` is the agent's final reply for this
+    user turn — the loop ends. When `tool_calls` is non-empty, `text`
+    is any narration the model emitted before deciding to call a tool
+    (often empty); the loop continues after executing the tools.
+    """
+    text: str = ""
+    tool_calls: list[PlannedCall] = field(default_factory=list)
 
 
 @dataclass
@@ -46,6 +60,11 @@ class ToolSpec:
     parameters: dict[str, Any]
 
 
+# Type alias: a callback invoked with each streamed text fragment.
+# Synchronous to keep clients simple — typical impl: `lambda s: print(s, end="", flush=True)`.
+TextDeltaCallback = Callable[[str], None]
+
+
 class LLMClient(ABC):
     """All provider clients implement this."""
 
@@ -56,6 +75,13 @@ class LLMClient(ABC):
         system_prompt: str,
         history: list[HistoryItem],
         tools: list[ToolSpec],
-    ) -> list[PlannedCall]:
-        """Ask the model what tool to call next."""
+        on_text_delta: TextDeltaCallback | None = None,
+    ) -> PlanResult:
+        """Ask the model for its next step.
+
+        If `on_text_delta` is provided, the client streams natural-language
+        output and calls the callback with each fragment as it arrives.
+        Tool calls are NOT streamed token-by-token — they are collected
+        and returned in the final PlanResult.
+        """
         ...

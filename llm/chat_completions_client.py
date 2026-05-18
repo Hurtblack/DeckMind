@@ -1,8 +1,8 @@
-"""Chat Completions client — works with DeepSeek, Kimi, Qwen, GLM,
-OpenRouter, and OpenAI itself (via the legacy chat endpoint).
+"""Chat Completions client — streams text + assembles tool calls.
 
-The OpenAI Python SDK speaks Chat Completions to any host you point it
-at via `base_url`, so we just reuse it.
+Works with DeepSeek, Kimi, Qwen, GLM, OpenRouter, and OpenAI itself
+(via the legacy chat endpoint). The OpenAI SDK speaks Chat Completions
+to any host you point it at via `base_url`, so we just reuse it.
 """
 
 from __future__ import annotations
@@ -12,7 +12,14 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from .base import HistoryItem, LLMClient, PlannedCall, ToolSpec
+from .base import (
+    HistoryItem,
+    LLMClient,
+    PlanResult,
+    PlannedCall,
+    TextDeltaCallback,
+    ToolSpec,
+)
 
 
 class ChatCompletionsClient(LLMClient):
@@ -77,27 +84,57 @@ class ChatCompletionsClient(LLMClient):
         system_prompt: str,
         history: list[HistoryItem],
         tools: list[ToolSpec],
-    ) -> list[PlannedCall]:
-        response = await self.client.chat.completions.create(
+        on_text_delta: TextDeltaCallback | None = None,
+    ) -> PlanResult:
+        # Tool-call deltas come in pieces and need to be reassembled by
+        # `index`. Each entry: {"id": str, "name": str, "args": str}.
+        tc_buffer: dict[int, dict[str, str]] = {}
+        text_parts: list[str] = []
+
+        stream = await self.client.chat.completions.create(
             model=self.model,
             messages=self._to_messages(system_prompt, history),
             tools=self._to_tools(tools),
             tool_choice="auto",
+            stream=True,
         )
 
-        msg = response.choices[0].message
-        if not msg.tool_calls:
-            return []
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if delta is None:
+                continue
+
+            # Text fragments → forward to callback + accumulate.
+            if delta.content:
+                text_parts.append(delta.content)
+                if on_text_delta is not None:
+                    on_text_delta(delta.content)
+
+            # Tool-call fragments → glue them together by `index`.
+            for tc in (delta.tool_calls or []):
+                idx = tc.index
+                slot = tc_buffer.setdefault(idx, {"id": "", "name": "", "args": ""})
+                if tc.id:
+                    slot["id"] = tc.id
+                fn = tc.function
+                if fn and fn.name:
+                    slot["name"] = fn.name
+                if fn and fn.arguments:
+                    slot["args"] += fn.arguments
 
         calls: list[PlannedCall] = []
-        for tc in msg.tool_calls:
+        for idx in sorted(tc_buffer):
+            slot = tc_buffer[idx]
             try:
-                args = json.loads(tc.function.arguments or "{}")
+                args = json.loads(slot["args"] or "{}")
             except json.JSONDecodeError:
                 args = {}
             calls.append(PlannedCall(
-                name=tc.function.name,
+                name=slot["name"],
                 arguments=args,
-                call_id=tc.id,
+                call_id=slot["id"],
             ))
-        return calls
+
+        return PlanResult(text="".join(text_parts), tool_calls=calls)

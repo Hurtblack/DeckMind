@@ -1,11 +1,15 @@
 """CLI entry point.
 
-Reads lines from stdin, hands each one to the Agent, prints the reply.
+Reads lines from stdin, hands each one to the Agent, streams the reply.
 Type `exit` / `quit` (or Ctrl-D / Ctrl-C) to leave.
+
+Flags:
+  -v, --verbose   show every tool call + raw result (developer mode)
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import os
 import sys
@@ -32,18 +36,24 @@ def _check_api_key() -> None:
         sys.exit(1)
 
 
-async def repl() -> None:
+async def repl(verbose: bool) -> None:
     """Async REPL: input() in a thread, agent.handle() awaited normally."""
     _check_api_key()
-    agent = Agent()
+
+    # Building the agent gathers device context (battery, disk, Steam
+    # library, Flatpak apps). Tell the user what we're doing because it
+    # can take a couple of seconds on a cold cache.
+    print("Gathering device context…", flush=True)
+    agent = await Agent.create(verbose=verbose)
     provider = os.environ.get("LLM_PROVIDER", "openai")
-    print(f"{BANNER}  [provider={provider}]")
+    mode = "verbose" if verbose else "quiet"
+    print(f"{BANNER}  [provider={provider} · {mode}]")
 
     loop = asyncio.get_running_loop()
     while True:
         try:
-            # Run blocking input() off the event loop so background macro
-            # tasks (start_key_loop) keep ticking while we wait for the user.
+            # Run blocking input() off the event loop so background
+            # macro tasks (start_key_loop) keep ticking while we wait.
             line = await loop.run_in_executor(None, lambda: input("you> "))
         except (EOFError, KeyboardInterrupt):
             print()
@@ -56,13 +66,18 @@ async def repl() -> None:
             break
 
         try:
-            reply = await agent.handle(line)
+            await agent.handle(line)
         except Exception as e:  # pragma: no cover — defensive top-level
             print(f"[agent error] {type(e).__name__}: {e}")
-            continue
 
-        print(f"bot> {reply}")
+
+def _parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="SteamDeckAgent — local LLM agent for Linux/Steam Deck")
+    p.add_argument("-v", "--verbose", action="store_true",
+                   help="show every tool call + raw result (developer mode)")
+    return p.parse_args()
 
 
 if __name__ == "__main__":
-    asyncio.run(repl())
+    args = _parse_args()
+    asyncio.run(repl(verbose=args.verbose))

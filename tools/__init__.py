@@ -21,12 +21,9 @@ from . import macro_tool, package_tool, steam_tool, system_tool
 ToolFn = Callable[..., Awaitable[dict[str, Any]]]
 
 
-async def _final_answer(message: str) -> dict[str, Any]:
-    """Sentinel tool — the LLM calls this to end the loop."""
-    return {"ok": True, "final": True, "message": message}
-
-
 # name -> (callable, neutral spec)
+# Note: the LLM ends a turn by simply producing natural-language text
+# (which is streamed to the user). There is no `final_answer` tool.
 TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
     "launch_game": (
         steam_tool.launch_game,
@@ -226,18 +223,6 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
             name="stop_all_macros",
             description="Cancel every running key-loop macro.",
             parameters={"type": "object", "properties": {}},
-        ),
-    ),
-    "final_answer": (
-        _final_answer,
-        ToolSpec(
-            name="final_answer",
-            description="Finish the current turn. `message` is shown to the user.",
-            parameters={
-                "type": "object",
-                "properties": {"message": {"type": "string"}},
-                "required": ["message"],
-            },
         ),
     ),
 }
