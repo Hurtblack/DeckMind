@@ -262,6 +262,44 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
             },
         ),
     ),
+    "notion_pages": (
+        notion_tool.notion_pages,
+        ToolSpec(
+            name="notion_pages",
+            description=(
+                "List all regular Notion PAGES (not database rows) the "
+                "integration has been shared into. Use to find a parent "
+                "for notion_create_page, e.g. when the user says '记到我"
+                "的主页里' / 'put it under my workspace homepage'."
+            ),
+            parameters={"type": "object", "properties": {}},
+        ),
+    ),
+    "notion_create_page": (
+        notion_tool.notion_create_page,
+        ToolSpec(
+            name="notion_create_page",
+            description=(
+                "Create a new page UNDER an existing page that's shared "
+                "with the DeckMind integration. `body_markdown` accepts "
+                "simple markdown: # / ## / ### headings, - or * bullets, "
+                "1. numbered lists, --- dividers, ```lang fenced code, "
+                "everything else becomes paragraphs. Inline bold/italic "
+                "is NOT parsed. Use for snapshot reports, notes, etc."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "parent_page_id": {"type": "string",
+                                       "description": "ID of the page to nest under"},
+                    "title": {"type": "string"},
+                    "body_markdown": {"type": "string",
+                                      "description": "Lightweight markdown body (optional)"},
+                },
+                "required": ["parent_page_id", "title"],
+            },
+        ),
+    ),
     "notion_log_session": (
         notion_tool.notion_log_session,
         ToolSpec(

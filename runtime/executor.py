@@ -45,6 +45,7 @@ RISK_SAFE: set[str] = {
     # notion_set_default_database touch ~/.deckmind/notion.json only.)
     "notion_status",
     "notion_databases",
+    "notion_pages",
     "notion_set_default_database",
     "notion_recent",
     "notion_total",
@@ -61,6 +62,9 @@ RISK_SIDE_EFFECT: set[str] = {
     # so the user can press `a` once and stop being asked for the rest
     # of the session (typical for batch logging).
     "notion_log_session",
+    # Creates a brand-new page (subpage) in Notion — strongest write of
+    # the set. Same [y/n/a] gate keeps batch reports tolerable.
+    "notion_create_page",
 }
 
 RISK_DESTRUCTIVE: set[str] = {

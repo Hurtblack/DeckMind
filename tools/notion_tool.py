@@ -263,6 +263,193 @@ async def notion_databases() -> dict[str, Any]:
     }
 
 
+# ---------- page-creation support ----------
+
+# Cap children per /pages call — Notion's hard limit is 100.
+_MAX_BLOCKS_PER_PAGE = 100
+
+
+def _text_block(block_type: str, content: str) -> dict[str, Any]:
+    """Build a single text block (paragraph / heading / bullet / ...)."""
+    return {
+        "object": "block",
+        "type": block_type,
+        block_type: {
+            "rich_text": [{"type": "text", "text": {"content": content}}],
+        },
+    }
+
+
+def _md_to_blocks(md: str) -> list[dict[str, Any]]:
+    """Convert lightweight markdown into Notion block objects.
+
+    Supported syntax (one line per block, except fenced code):
+      # foo / ## foo / ### foo    -> heading_1 / 2 / 3
+      - foo  or  * foo            -> bulleted_list_item
+      1. foo                      -> numbered_list_item
+      ---                         -> divider
+      ```lang ... ```             -> code block
+      anything else                -> paragraph
+
+    Blank lines are skipped. Inline markdown (bold/italic/links) is NOT
+    parsed — Notion's rich_text spans would need a real parser.
+    """
+    blocks: list[dict[str, Any]] = []
+    in_code = False
+    code_lang = "plain text"
+    code_lines: list[str] = []
+
+    for raw in md.splitlines():
+        line = raw.rstrip()
+
+        if in_code:
+            if line.startswith("```"):
+                blocks.append({
+                    "object": "block", "type": "code",
+                    "code": {
+                        "rich_text": [{"type": "text",
+                                       "text": {"content": "\n".join(code_lines)}}],
+                        "language": code_lang,
+                    },
+                })
+                in_code = False
+                code_lang = "plain text"
+                code_lines = []
+            else:
+                code_lines.append(raw)
+            continue
+
+        if line.startswith("```"):
+            in_code = True
+            code_lang = (line[3:].strip().lower() or "plain text")
+            continue
+
+        if not line.strip():
+            continue
+        if line.strip() == "---":
+            blocks.append({"object": "block", "type": "divider", "divider": {}})
+        elif line.startswith("### "):
+            blocks.append(_text_block("heading_3", line[4:]))
+        elif line.startswith("## "):
+            blocks.append(_text_block("heading_2", line[3:]))
+        elif line.startswith("# "):
+            blocks.append(_text_block("heading_1", line[2:]))
+        elif line.startswith("- ") or line.startswith("* "):
+            blocks.append(_text_block("bulleted_list_item", line[2:]))
+        elif len(line) > 2 and line[0].isdigit() and line[1:3] in (". ", ") "):
+            blocks.append(_text_block("numbered_list_item", line[3:]))
+        else:
+            blocks.append(_text_block("paragraph", line))
+
+    # Flush any unterminated code fence so its content isn't silently lost.
+    if in_code and code_lines:
+        blocks.append({
+            "object": "block", "type": "code",
+            "code": {
+                "rich_text": [{"type": "text", "text": {"content": "\n".join(code_lines)}}],
+                "language": code_lang,
+            },
+        })
+    return blocks
+
+
+async def notion_pages() -> dict[str, Any]:
+    """List Notion PAGES (not database rows) the integration can access."""
+    if not _key():
+        return {"ok": False, "error": "NOTION_API_KEY not set", "hint": _SETUP_HINT}
+    data, err = await _request("POST", "/search", json={
+        "filter": {"value": "page", "property": "object"},
+        "page_size": 100,
+    })
+    if err:
+        return err
+
+    pages: list[dict[str, str]] = []
+    for p in data.get("results", []):
+        # Skip database rows — those have parent.type == "database_id".
+        parent = p.get("parent", {})
+        if parent.get("type") == "database_id":
+            continue
+        title = ""
+        for prop in p.get("properties", {}).values():
+            if prop.get("type") == "title":
+                title = "".join(t.get("plain_text", "") for t in prop["title"])
+                break
+        pages.append({
+            "id": p["id"],
+            "title": title or "(untitled)",
+            "url": p.get("url", ""),
+        })
+    return {
+        "ok": True, "count": len(pages), "pages": pages,
+        "hint": (None if pages else
+                 "没找到任何能访问的页面。在 Notion 里把目标页面分享给 "
+                 "DeckMind integration（页面右上 ⋯ → Connections → DeckMind）。"),
+    }
+
+
+async def notion_create_page(
+    parent_page_id: str,
+    title: str,
+    body_markdown: str = "",
+) -> dict[str, Any]:
+    """Create a new page underneath `parent_page_id` with optional markdown body.
+
+    The parent page MUST already be shared with the DeckMind integration
+    (Notion permissions inherit, so children of a shared page are also
+    accessible — but the parent must be explicitly connected).
+    """
+    if not _key():
+        return {"ok": False, "error": "NOTION_API_KEY not set", "hint": _SETUP_HINT}
+    if not (title or "").strip():
+        return {"ok": False, "error": "title is required"}
+
+    payload: dict[str, Any] = {
+        "parent": {"type": "page_id", "page_id": parent_page_id},
+        "properties": {
+            "title": {
+                "title": [{"type": "text", "text": {"content": title.strip()}}],
+            },
+        },
+    }
+
+    blocks: list[dict[str, Any]] = []
+    if body_markdown:
+        blocks = _md_to_blocks(body_markdown)
+        if blocks:
+            payload["children"] = blocks[:_MAX_BLOCKS_PER_PAGE]
+
+    data, err = await _request("POST", "/pages", json=payload)
+    if err:
+        return err
+
+    page_id = data.get("id")
+    truncated = len(blocks) > _MAX_BLOCKS_PER_PAGE
+
+    # If the body was longer than the per-call limit, append the rest
+    # via the children endpoint. Notion allows another 100 per call.
+    overflow_appended = 0
+    if truncated and page_id:
+        leftover = blocks[_MAX_BLOCKS_PER_PAGE:]
+        # Bound the overflow to avoid spamming long-running calls.
+        leftover = leftover[:_MAX_BLOCKS_PER_PAGE]
+        _, append_err = await _request(
+            "PATCH", f"/blocks/{page_id}/children",
+            json={"children": leftover},
+        )
+        if not append_err:
+            overflow_appended = len(leftover)
+
+    return {
+        "ok": True, "created": True,
+        "title": title.strip(),
+        "page_id": page_id,
+        "url": data.get("url"),
+        "blocks_written": min(len(blocks), _MAX_BLOCKS_PER_PAGE) + overflow_appended,
+        "blocks_dropped": max(0, len(blocks) - _MAX_BLOCKS_PER_PAGE - overflow_appended),
+    }
+
+
 async def notion_set_default_database(database_id: str) -> dict[str, Any]:
     """Persist `database_id` as the default for all future notion_* calls."""
     if not _key():
