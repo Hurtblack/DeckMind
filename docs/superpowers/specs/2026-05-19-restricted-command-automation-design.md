@@ -1,49 +1,42 @@
-# Restricted Command Automation Design
+# 受限命令自动化设计
 
-## Background
+## 背景
 
-DeckMind already has dedicated tools for common Steam Deck tasks: Flatpak
-install/uninstall, pacman install, text file writes, file search, process
-listing, Steam game launch, and user-level configuration. These tools reduce
-manual work when the exact operation is modeled.
+DeckMind 目前已经有一批面向 Steam Deck 的专用工具：Flatpak 安装/卸载、pacman
+安装、文本文件写入、文件搜索、进程列表、Steam 游戏启动，以及用户级配置管理。
+当用户需求正好落在这些工具覆盖范围内时，DeckMind 可以直接执行，减少手动操作。
 
-The current gap appears when a task needs a small command sequence that is not
-yet modeled as a dedicated tool. In the Clash Verge case, DeckMind could find
-the AppImage and write a download script, but it could not directly run the
-download or mark the file executable. The user then had to copy or type
-commands manually.
+现在的缺口出现在另一类任务：用户要做的是一小段命令流程，但这段流程还没有被封装成专用工具。
+以 Clash Verge 为例，DeckMind 可以找到 AppImage，也可以写下载脚本，但不能直接运行下载命令或给文件加执行权限。
+用户最后仍然要复制或手动输入命令。
 
-The user confirmed the desired direction: add restricted shell automation so
-the user only needs to grant permission, not type commands.
+用户已确认期望方向：增加“受限 shell 自动化”，让用户只需要授权，不需要自己敲命令。
 
-## Goal
+## 目标
 
-Add a constrained command execution capability that lets DeckMind perform
-simple, user-level operational steps directly after user approval.
+新增一个受约束的命令执行能力，让 DeckMind 可以在用户授权后，直接完成简单的用户级操作步骤。
 
-The primary success case is:
+主要成功场景：
 
-1. The user asks DeckMind to download or set up a user-space application.
-2. DeckMind previews the command it intends to run.
-3. The user grants permission with the existing confirmation flow.
-4. DeckMind runs the command, validates the result, and reports the outcome.
+1. 用户要求 DeckMind 下载或设置一个用户空间应用。
+2. DeckMind 预览将要执行的命令。
+3. 用户通过现有确认流程授权。
+4. DeckMind 执行命令、校验结果，并向用户报告最终状态。
 
-## Non-Goals
+## 非目标
 
-- Do not expose arbitrary shell access to the model.
-- Do not use `shell=True`.
-- Do not support pipes, redirection, command substitution, shell expansion, or
-  compound commands.
-- Do not allow writes outside explicitly approved user-owned directories.
-- Do not replace dedicated tools such as `install_flatpak` or `pacman_install`
-  when those tools already cover the request.
-- Do not accept or process credentials pasted into chat.
+- 不向模型开放任意 shell。
+- 不使用 `shell=True`。
+- 不支持管道、重定向、命令替换、shell 展开或复合命令。
+- 不允许写入明确批准目录之外的位置。
+- 当 `install_flatpak`、`pacman_install` 等专用工具已经覆盖需求时，不用通用命令工具替代它们。
+- 不接受或处理用户粘贴到聊天里的凭据。
 
-## Proposed Tool
+## 新增工具
 
-Add a new tool named `run_command`.
+新增工具：`run_command`。
 
-The tool accepts an argv-style command:
+工具接收 argv 形式的命令：
 
 ```json
 {
@@ -52,32 +45,28 @@ The tool accepts an argv-style command:
 }
 ```
 
-The implementation runs commands with `asyncio.create_subprocess_exec(*argv)`.
-There is no shell parsing layer.
+实现上使用 `asyncio.create_subprocess_exec(*argv)` 执行命令，不经过 shell 解析层。
 
-## Command Allowlist
+## 命令白名单
 
-The first implementation should allow only commands needed for the reported
-workflow and adjacent user-level automation:
+第一版只允许覆盖当前反馈和相邻用户级自动化所需的命令：
 
-- `curl`: downloads and lightweight HTTP checks.
-- `wget`: downloads when available and when its arguments pass validation.
-- `chmod`: permission changes for files in approved user directories.
-- `mkdir`: creating approved user directories.
-- `file`: inspecting downloaded files.
-- `which`: checking command availability.
-- `systemctl --user`: managing user-level services only.
+- `curl`：下载文件和轻量 HTTP 检查。
+- `wget`：在可用且参数通过校验时下载文件。
+- `chmod`：修改批准目录内文件的权限。
+- `mkdir`：创建批准目录内的用户目录。
+- `file`：检查已下载文件的类型。
+- `which`：检查命令是否存在。
+- `systemctl --user`：只管理用户级 systemd 服务。
 
-Dedicated package tools remain preferred:
+已有专用工具仍然优先：
 
-- Use `install_flatpak` / `uninstall_flatpak` for Flatpak app management.
-- Use `pacman_install` for pacman installs because it handles SteamOS
-  read-only state and warning behavior.
+- Flatpak 应用管理继续使用 `install_flatpak` / `uninstall_flatpak`。
+- pacman 安装继续使用 `pacman_install`，因为它已经处理 SteamOS 只读状态和风险提示。
 
-## Path Policy
+## 路径策略
 
-Commands that write or mutate files may only target approved user-owned
-locations:
+会写入或修改文件的命令，只能作用在以下用户拥有的位置：
 
 - `~/Downloads`
 - `~/.deckmind`
@@ -87,8 +76,7 @@ locations:
 - `~/Documents`
 - `~/Desktop`
 
-The tool refuses paths containing sensitive fragments even inside approved
-locations:
+即使路径位于批准目录内，只要包含下列敏感片段也必须拒绝：
 
 - `/.ssh`
 - `/.gnupg`
@@ -102,100 +90,95 @@ locations:
 - `id_rsa`
 - `id_ed25519`
 
-The tool expands `~` and checks normalized absolute paths before execution.
-It refuses symlink targets for write or mutation operations.
+工具需要展开 `~`，并在执行前检查规范化后的绝对路径。对于写入或修改操作，目标如果是符号链接则拒绝。
 
-## Risk Classification
+## 风险分级
 
-Add `run_command` to the existing Executor risk system as destructive. The
-tool follows the same two-step pattern as existing destructive tools:
+将 `run_command` 加入现有 Executor 风险体系，归类为 destructive。工具沿用现有破坏性工具的两步流程：
 
-1. `confirm=false`: validate arguments and return a dry-run preview.
-2. `confirm=true`: execute only after the Executor asks for confirmation.
+1. `confirm=false`：校验参数并返回 dry-run 预览。
+2. `confirm=true`：Executor 向用户确认后才执行。
 
-The Executor already supports `a=本会话此工具全允许`. That behavior should
-apply to `run_command` so a user can approve a batch of related steps once per
-session.
+现有 Executor 已支持 `a=本会话此工具全允许`。这个行为也应适用于 `run_command`，
+这样用户可以对同一批相关步骤做一次会话级授权。
 
-The tool itself also validates every command on both dry-run and execution.
-Executor approval is not a substitute for allowlist and path validation.
+工具本身仍然必须在 dry-run 和实际执行前都做 allowlist 与路径校验。Executor 授权不能替代工具内部校验。
 
-## Command-Specific Rules
+## 命令级规则
 
 ### `curl`
 
-Allowed forms should cover downloads and header checks:
+允许形式覆盖下载和 header 检查：
 
-- `curl -L -o <approved-path> <http-url>`
-- `curl -fL -o <approved-path> <http-url>`
+- `curl -L -o <批准路径> <http-url>`
+- `curl -fL -o <批准路径> <http-url>`
 - `curl -I <http-url>`
 - `curl -L -I <http-url>`
 
-Rules:
+规则：
 
-- URLs must use `http` or `https`.
-- Output path must be inside an approved write directory.
-- Refuse credential-like URLs containing obvious token parameters when
-  practical, such as `token=`, `access_token=`, or `key=`.
-- Set a reasonable timeout if the user did not provide one.
-- Capture stdout/stderr tails, return code, elapsed time, and output file size.
+- URL 必须使用 `http` 或 `https`。
+- 输出路径必须位于批准的写入目录内。
+- 在可行范围内拒绝明显携带凭据的 URL 参数，例如 `token=`、`access_token=`、`key=`。
+- 如果用户没有提供超时参数，工具应设置合理超时。
+- 返回 stdout/stderr 尾部、返回码、耗时，以及输出文件大小。
 
 ### `wget`
 
-Allowed form:
+允许形式：
 
-- `wget -O <approved-path> <http-url>`
+- `wget -O <批准路径> <http-url>`
 
-Apply the same URL and output path rules as `curl`.
+使用与 `curl` 相同的 URL 和输出路径规则。
 
 ### `chmod`
 
-Allowed form:
+允许形式：
 
-- `chmod +x <approved-path>`
+- `chmod +x <批准路径>`
 
-Rules:
+规则：
 
-- Only allow adding executable permission.
-- Refuse recursive mode.
-- Refuse numeric or broad modes in the first version.
-- Target must be a regular file in an approved write directory.
+- 第一版只允许增加可执行权限。
+- 拒绝递归模式。
+- 拒绝数字权限或过宽权限模式。
+- 目标必须是批准写入目录内的普通文件。
 
 ### `mkdir`
 
-Allowed form:
+允许形式：
 
-- `mkdir -p <approved-directory>`
+- `mkdir -p <批准目录>`
 
-Rules:
+规则：
 
-- Directory must be inside an approved write directory.
-- Refuse creation of sensitive or credential-like paths.
+- 目录必须位于批准写入目录内。
+- 拒绝创建敏感或凭据相关路径。
 
 ### `file`
 
-Allowed form:
+允许形式：
 
-- `file <approved-readable-path>`
+- `file <批准读取路径>`
 
-Rules:
+规则：
 
-- Read-only inspection only.
-- Target must be in an approved read location.
+- 只做只读检查。
+- 目标必须位于批准读取位置内。
 
 ### `which`
 
-Allowed form:
+允许形式：
 
-- `which <command-name>`
+- `which <命令名>`
 
-Rules:
+规则：
 
-- Command name must be a simple executable name, not a path.
+- 命令名必须是简单可执行文件名，不能是路径。
 
 ### `systemctl --user`
 
-Allowed forms:
+允许形式：
 
 - `systemctl --user daemon-reload`
 - `systemctl --user enable <unit>`
@@ -204,60 +187,50 @@ Allowed forms:
 - `systemctl --user stop <unit>`
 - `systemctl --user status <unit>`
 
-Rules:
+规则：
 
-- Only user-level systemd is allowed.
-- System-level `systemctl` is refused.
-- Unit names must be simple `.service` units, not paths.
+- 只允许用户级 systemd。
+- 拒绝系统级 `systemctl`。
+- unit 名必须是简单的 `.service` 单元名，不能是路径。
 
-## Clash Verge Flow
+## Clash Verge 流程
 
-When the user asks DeckMind to download Clash Verge and a URL is known or
-provided, the intended flow is:
+当用户要求 DeckMind 下载 Clash Verge，并且下载 URL 已知或由用户提供时，预期流程如下：
 
-1. Use `run_command` with `curl` and `confirm=false` to preview the download.
-2. After user approval, run the download command.
-3. Validate the downloaded file exists and has a plausible non-trivial size.
-4. Use `run_command` with `chmod +x` and the same approval session when
-   possible.
-5. Optionally use `file` to inspect the result.
-6. Report the final path and whether it is executable.
+1. 使用 `run_command` 调用 `curl`，并以 `confirm=false` 预览下载命令。
+2. 用户授权后执行下载命令。
+3. 校验下载文件存在，并且大小不是明显异常的小文件。
+4. 尽可能复用同一次会话授权，使用 `run_command` 执行 `chmod +x`。
+5. 可选使用 `file` 检查下载结果。
+6. 告诉用户最终路径，以及文件是否已经可执行。
 
-This turns the current "write a script and ask the user to run it" workflow
-into "DeckMind runs the validated command after permission".
+这会把当前“写脚本让用户手动运行”的流程，变成“DeckMind 在校验命令后，获得授权并直接执行”。
 
-## Prompt Updates
+## Prompt 更新
 
-Update `prompts/system_prompt.txt` to explain:
+更新 `prompts/system_prompt.txt`，说明：
 
-- Use dedicated tools first.
-- Use `run_command` for small user-level command automation when no dedicated
-  tool exists.
-- Never ask the user to manually type a command that `run_command` can safely
-  execute after permission.
-- Never use `run_command` for credentials, arbitrary shell, sudo, pacman, or
-  system-level changes.
+- 优先使用专用工具。
+- 当没有专用工具覆盖时，用 `run_command` 执行小型用户级命令自动化。
+- 如果 `run_command` 能在授权后安全执行，就不要要求用户手动输入命令。
+- 不要把 `run_command` 用于凭据、任意 shell、sudo、pacman 或系统级变更。
 
-## Testing
+## 测试
 
-Add focused tests or verification scripts for:
+增加聚焦测试或验证脚本，覆盖：
 
-- Allowed `curl -L -o ~/Downloads/name.AppImage <url>` dry-run validation.
-- Refusal of shell metacharacters or compound commands.
-- Refusal of writes outside approved directories.
-- Refusal of sensitive path fragments.
-- Refusal of `chmod -R` and numeric chmod modes.
-- Refusal of system-level `systemctl`.
-- Successful execution path with a harmless local command such as `which sh`
-  or `mkdir -p ~/.deckmind/test-command-runner`.
+- 允许 `curl -L -o ~/Downloads/name.AppImage <url>` 的 dry-run 校验。
+- 拒绝 shell 元字符或复合命令。
+- 拒绝写入批准目录之外的位置。
+- 拒绝敏感路径片段。
+- 拒绝 `chmod -R` 和数字 chmod 模式。
+- 拒绝系统级 `systemctl`。
+- 使用无害本地命令验证成功执行路径，例如 `which sh` 或 `mkdir -p ~/.deckmind/test-command-runner`。
 
-If the project does not yet have a formal test harness, add lightweight unit
-tests around the command validator first. The validator should be separated
-from subprocess execution so most safety behavior is testable without running
-external commands.
+如果项目还没有正式测试框架，先为命令校验器增加轻量单元测试。校验器应和 subprocess 执行分离，
+这样大部分安全行为都可以在不实际运行外部命令的情况下测试。
 
-## Future Scope
+## 未来范围
 
-The first implementation should keep the allowlist intentionally small. Future
-commands can be added only when there is a concrete user workflow and a clear
-validator for that command.
+第一版应保持命令白名单足够小。未来只有在出现具体用户工作流，并且能为新命令写出清晰校验器时，
+才扩展新的命令。
