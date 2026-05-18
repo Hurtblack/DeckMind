@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 import time
 from dataclasses import dataclass
@@ -70,6 +69,7 @@ _SHELL_META_TOKENS: tuple[str, ...] = (
     ">",
     "<",
     "`",
+    "$",
 )
 
 _SIMPLE_COMMAND_RE = re.compile(r"^[A-Za-z0-9._+-]+$")
@@ -89,7 +89,7 @@ def _approved_read_dirs() -> tuple[Path, ...]:
 
 
 def _normalize_path(raw_path: str) -> Path:
-    return Path(os.path.expandvars(os.path.expanduser(raw_path))).resolve(strict=False)
+    return Path(raw_path).expanduser().resolve(strict=False)
 
 
 def _is_under(path: Path, directory: Path) -> bool:
@@ -208,7 +208,9 @@ def _validate_curl(argv: list[str]) -> ValidationResult:
         path, path_reason = _validate_approved_write_path(output)
         if path_reason:
             return _reject(argv, path_reason, command=command)
-        return _validated(argv, command, output_path=str(path))
+        exec_argv = list(argv)
+        exec_argv[3] = str(path)
+        return _validated(exec_argv, command, output_path=str(path))
 
     if len(argv) == 3 and argv[1] == "-I":
         url_reason = _validate_url(argv[2])
@@ -238,7 +240,9 @@ def _validate_wget(argv: list[str]) -> ValidationResult:
     if path_reason:
         return _reject(argv, path_reason, command=command)
 
-    return _validated(argv, command, output_path=str(path))
+    exec_argv = list(argv)
+    exec_argv[2] = str(path)
+    return _validated(exec_argv, command, output_path=str(path))
 
 
 def _validate_chmod(argv: list[str]) -> ValidationResult:
@@ -252,7 +256,9 @@ def _validate_chmod(argv: list[str]) -> ValidationResult:
     if path is None or not path.exists() or not path.is_file():
         return _reject(argv, "chmod target must be an existing regular file", command=command)
 
-    return _validated(argv, command, output_path=str(path))
+    exec_argv = list(argv)
+    exec_argv[2] = str(path)
+    return _validated(exec_argv, command, output_path=str(path))
 
 
 def _validate_mkdir(argv: list[str]) -> ValidationResult:
@@ -264,7 +270,9 @@ def _validate_mkdir(argv: list[str]) -> ValidationResult:
     if path_reason:
         return _reject(argv, path_reason, command=command)
 
-    return _validated(argv, command, output_path=str(path))
+    exec_argv = list(argv)
+    exec_argv[2] = str(path)
+    return _validated(exec_argv, command, output_path=str(path))
 
 
 def _validate_file(argv: list[str]) -> ValidationResult:
@@ -272,11 +280,13 @@ def _validate_file(argv: list[str]) -> ValidationResult:
     if len(argv) != 2:
         return _reject(argv, "file expects one path", command=command)
 
-    _, path_reason = _validate_readable_path(argv[1])
+    path, path_reason = _validate_readable_path(argv[1])
     if path_reason:
         return _reject(argv, path_reason, command=command)
 
-    return _validated(argv, command, read_only=True)
+    exec_argv = list(argv)
+    exec_argv[1] = str(path)
+    return _validated(exec_argv, command, read_only=True)
 
 
 def _validate_which(argv: list[str]) -> ValidationResult:
@@ -314,8 +324,7 @@ def _validate_systemctl(argv: list[str]) -> ValidationResult:
 async def run_command(argv: list[str], confirm: bool = False) -> dict[str, Any]:
     """Validate and optionally execute a command.
 
-    Mutating commands return a dry-run preview unless confirm=True.
-    Read-only commands run immediately after validation.
+    Commands return a dry-run preview unless confirm=True.
     """
     validation = validate_command(argv)
     if not validation.ok:
@@ -348,7 +357,28 @@ async def _execute_validated(validation: ValidationResult) -> dict[str, Any]:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await proc.communicate()
+    communicate = proc.communicate()
+    try:
+        stdout, stderr = await asyncio.wait_for(communicate, timeout=60)
+    except asyncio.TimeoutError:
+        if hasattr(communicate, "close"):
+            communicate.close()
+        proc.kill()
+        await proc.wait()
+        elapsed = time.monotonic() - started
+        return {
+            "ok": False,
+            "argv": validation.argv,
+            "command": validation.command,
+            "returncode": -1,
+            "stdout_tail": "",
+            "stderr_tail": "",
+            "elapsed_seconds": elapsed,
+            "output_size_bytes": None,
+            "read_only": validation.read_only,
+            "output_path": validation.output_path,
+            "error": "command timed out after 60 seconds",
+        }
     elapsed = time.monotonic() - started
 
     stdout_text = stdout.decode(errors="replace")
