@@ -65,7 +65,7 @@ SteamOS 出厂没有 sudo 密码，必须先自己设一个，否则后面装东
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-source $HOME/.cargo/env
+source $HOME/.local/bin/env
 ```
 
 uv 装在 `~/.local/bin`，SteamOS 大版本更新清空 `/usr` 时不会丢。如果哪天发现
