@@ -238,17 +238,24 @@ export MOONSHOT_API_KEY=sk-...
 uv run python main.py
 ```
 
-## 内置工具
+## 内置工具（共 27 个）
 
-| 分组 | 工具 | 破坏性？ |
+| 分组 | 工具 | 风险 |
 |---|---|---|
-| Steam | `launch_game`、`close_game`、`list_running_games` | 否 |
-| Steam | `install_game`、`uninstall_game` | **是（两步确认）** |
-| 包管理 | `list_flatpak_apps`、`search_flatpak`、`disk_usage` | 否 |
-| 包管理 | `install_flatpak`、`uninstall_flatpak` | **是（两步确认）** |
-| 系统 | `get_battery`、`get_volume`、`set_volume` | 否 |
-| 宏 | `press_key`、`start_key_loop`、`stop_all_macros` | 否 |
-| Meta | `final_answer` | — |
+| Steam | `launch_game`、`close_game`、`list_running_games` | side-effect |
+| Steam | `install_game`、`uninstall_game` | **destructive（两步确认）** |
+| 包管理 | `list_flatpak_apps`、`search_flatpak`、`disk_usage` | safe |
+| 包管理 | `install_flatpak`、`uninstall_flatpak` | **destructive（两步确认）** |
+| 系统 | `get_battery`、`get_volume` | safe |
+| 系统 | `set_volume` | side-effect |
+| 宏 | `press_key`、`start_key_loop`、`stop_all_macros` | side-effect |
+| **画像** | `remember`、`forget`、`list_profile` | safe |
+| **自更新** | `check_for_updates` | safe |
+| **自更新** | `apply_update` | **destructive（两步确认）** |
+| **Notion** | `notion_status`、`notion_databases`、`notion_set_default_database`、`notion_recent`、`notion_total` | safe |
+| **Notion** | `notion_log_session` | side-effect |
+
+Agent 用一段自然语言回复来结束一轮 —— 不再有 `final_answer` 这种哨兵工具。
 
 ### Runtime 权限闸门（代码层强制）
 
@@ -257,11 +264,12 @@ uv run python main.py
 
 | 风险等级 | 行为 | 工具 |
 |---|---|---|
-| `safe`（安全） | 静默放行 | get_*、list_*、search_*、disk_usage、final_answer |
-| `side_effect`（副作用） | 弹 `[y=允许 / n=拒绝 / a=本工具本会话全允许]` | set_volume、press_key、start_key_loop、stop_all_macros、launch_game、close_game |
-| `destructive`（破坏性） | `confirm=false` 是免费预览；`confirm=true` 执行前弹 `[y/n]` | install_*、uninstall_* |
+| `safe`（安全） | 静默放行 | get_*、list_*、search_*、disk_usage、check_for_updates、remember/forget/list_profile、notion_status/databases/recent/total/set_default_database |
+| `side_effect`（副作用） | 弹 `[y=允许 / n=拒绝 / a=本工具本会话全允许]` | set_volume、press_key、start_key_loop、stop_all_macros、launch_game、close_game、notion_log_session |
+| `destructive`（破坏性） | `confirm=false` 是免费预览；`confirm=true` 执行前弹 `[y / n / a]` | install_*、uninstall_*、apply_update |
 
-闸门默认**问而不拦**，最终决定权永远在你手里。
+闸门默认**问而不拦**，最终决定权永远在你手里。`a`（全允许）在 side_effect 和
+destructive 两种提示里都生效 —— 批量操作时按一次后就不再骚扰。
 
 ### 什么情况会硬拒绝并说明原因
 
@@ -279,6 +287,96 @@ uv run python main.py
 
 其他情况 —— 哪怕看上去有点吓人，比如要 `kill` 一个叫 `bash` 的进程，
 或者卸载某个第三方模拟器 —— 都只会走正常的询问流程交给你决定。
+
+## 持久化用户画像
+
+Agent **跨重启**记得你告诉它的事。存在 `~/.deckmind/profile.json`，
+一个简单的 key→value JSON。每次启动时自动注入到 system prompt，所以
+第一次说话之前 agent 就"认识你"了。
+
+```
+you › 记住我叫赖天宇，喜欢魂系游戏，周末才有时间玩
+deckmind › 好的，记下来啦。
+
+[exit，重新打开 deckmind，甚至重启 Deck]
+
+you › 推荐一个我现在能玩的
+deckmind › 看你喜欢魂系、加上时间紧 —— 试试 Sekiro，单局节奏快。
+```
+
+也可以直接 `nano ~/.deckmind/profile.json` 手动编辑，就是纯 JSON。
+
+## 自我更新
+
+Agent 可以自己从 GitHub 拉最新代码：
+
+```
+you › 检查更新           → 调用 check_for_updates（只读）
+deckmind › 落后 3 个提交，新内容：...
+
+you › 拉一下             → 调用 apply_update(confirm=false)
+deckmind › 预览：从 abc → def，3 个提交。要执行吗？
+you › 确认
+deckmind › ✓ pull + uv sync 完成。退出后重启 agent 加载新代码。
+```
+
+安全约束：
+- 只在项目目录内操作。
+- 拉取的是本地配置的 `origin`（LLM 改不了 URL，工具签名不接受）。
+- `git pull --ff-only`，历史分叉会大声报错而不是悄悄合并。
+- 有未提交的**跟踪文件改动**时硬拒绝。未跟踪文件（如 `uv.lock`）不会
+  阻塞，也不会被覆盖。
+
+## Notion 日志
+
+把游戏时长记录到你的 Notion 数据库。三步设置：
+
+1. **拿 token** —— 在 https://www.notion.so/profile/integrations 建一个
+   *Internal Integration*，复制那串 `ntn_…`。
+2. **写到 env**（用 `nano ~/.bashrc`，**绝不要**把 token 输入到 agent
+   或任何聊天 —— 会被发到 LLM 服务商的日志里）：
+   ```bash
+   export NOTION_API_KEY=ntn_xxxxx
+   ```
+   然后 `source ~/.bashrc` + 重启 `deckmind`。
+3. **把数据库分享给 integration**（数据库右上 `⋯` → Connections →
+   搜 DeckMind → 加进去）。
+
+完事 —— **不需要 `NOTION_DATABASE_ID`**。你说"绑定 notion"时，
+`notion_status` 会自动发现：
+
+- **只分享了 1 个数据库** → 自动选中，存到 `~/.deckmind/notion.json`
+- **分享了 2+ 个** → 列出来让你选，然后调 `notion_set_default_database`
+- **一个都没分享** → 提示你先去 Notion 分享
+
+字段按**类型匹配**，不按名字 —— 只要数据库有 Title + Number + Date
+（外加可选的 Rich Text 当备注），不管字段叫啥都能用。
+
+```
+you › 记一笔我刚玩了 1 小时 Hades
+deckmind › ✓ 已记录：Hades · 60 分钟 · 今天
+
+you › 这周玩了多久
+deckmind › 本周共 8.5 小时。排行：Hades 4h、Stardew 2h、CS2 1.5h。
+```
+
+## 运行时界面（UI）
+
+```
+you ›                  ← 亮青色粗体（你的输入）
+deckmind ›             ← 亮绿色粗体（agent 回复，字逐字流式输出）
+  · tool_name…         ← 暗黄色（quiet 模式的工具调用提示）
+  ! refused: ...       ← 暗红色（只在出错/拒绝时出现）
+  ↳ 耗时 1.8s  ·  本轮 提示 9,810 + 回复 192 tokens  ·  累计 ...  ·  模型 deepseek-chat
+                       ← 暗灰色（每轮回答后的 footer）
+```
+
+- **流式输出**：模型生成一个字蹦一个字，不用等整段。
+- **Footer**：墙上时钟耗时 + 本轮 token + 会话累计 + 模型名。
+- **颜色**：尊重 `NO_COLOR` 环境变量；stdout 不是 TTY 时自动关闭
+  （管道导出到文件不会被乱码污染）。
+- **`-v` 参数**：verbose 模式显示完整的 `▸ tool: name({args})` 和
+  原始结果字典。默认 quiet 模式只显示工具名。
 
 ## 示例对话
 

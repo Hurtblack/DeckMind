@@ -249,17 +249,25 @@ does not change.
 uv run python main.py
 ```
 
-## Built-in tools
+## Built-in tools (27 total)
 
-| Group | Tool | Destructive? |
+| Group | Tools | Risk |
 |---|---|---|
-| Steam | `launch_game`, `close_game`, `list_running_games` | no |
-| Steam | `install_game`, `uninstall_game` | **yes (2-step confirm)** |
-| Packages | `list_flatpak_apps`, `search_flatpak`, `disk_usage` | no |
-| Packages | `install_flatpak`, `uninstall_flatpak` | **yes (2-step confirm)** |
-| System | `get_battery`, `get_volume`, `set_volume` | no |
-| Macro | `press_key`, `start_key_loop`, `stop_all_macros` | no |
-| Meta | `final_answer` | — |
+| Steam | `launch_game`, `close_game`, `list_running_games` | side-effect |
+| Steam | `install_game`, `uninstall_game` | **destructive (2-step confirm)** |
+| Packages | `list_flatpak_apps`, `search_flatpak`, `disk_usage` | safe |
+| Packages | `install_flatpak`, `uninstall_flatpak` | **destructive (2-step confirm)** |
+| System | `get_battery`, `get_volume` | safe |
+| System | `set_volume` | side-effect |
+| Macro | `press_key`, `start_key_loop`, `stop_all_macros` | side-effect |
+| **Profile** | `remember`, `forget`, `list_profile` | safe |
+| **Self-update** | `check_for_updates` | safe |
+| **Self-update** | `apply_update` | **destructive (2-step confirm)** |
+| **Notion** | `notion_status`, `notion_databases`, `notion_set_default_database`, `notion_recent`, `notion_total` | safe |
+| **Notion** | `notion_log_session` | side-effect |
+
+The agent ends a turn by emitting natural-language text — there is no
+`final_answer` sentinel tool.
 
 ### Runtime permission gate
 
@@ -269,12 +277,14 @@ system-prompt rules. Three risk classes:
 
 | Class | Behavior | Tools |
 |---|---|---|
-| `safe` | runs silently | get_*, list_*, search_*, disk_usage, final_answer |
-| `side_effect` | prompts `[y / n / a]` (a = allow this tool for the rest of the session) | set_volume, press_key, start_key_loop, stop_all_macros, launch_game, close_game |
-| `destructive` | `confirm=false` is a free preview; `confirm=true` prompts `[y / n]` before running | install_*, uninstall_* |
+| `safe` | runs silently | get_*, list_*, search_*, disk_usage, check_for_updates, remember/forget/list_profile, notion_status/databases/recent/total/set_default_database |
+| `side_effect` | prompts `[y / n / a]` (a = allow this tool for the rest of the session) | set_volume, press_key, start_key_loop, stop_all_macros, launch_game, close_game, notion_log_session |
+| `destructive` | `confirm=false` is a free preview; `confirm=true` prompts `[y / n / a]` before running | install_*, uninstall_*, apply_update |
 
 The gate's default is **ask, don't block** — you always have the final
-word.
+word. `a` (allow-all) carries across both side-effect and destructive
+prompts for the remainder of the session, so batch operations don't
+pester you.
 
 ### When the agent will hard-refuse with a reason
 
@@ -297,6 +307,105 @@ confused.
 Everything else — including arguably scary stuff like killing a process
 named `bash`, or uninstalling a third-party emulator — just goes
 through the normal prompt and lets you decide.
+
+## Persistent user profile
+
+The agent remembers facts you've told it across restarts. Stored at
+`~/.deckmind/profile.json` as a flat key→value map. The profile is
+auto-injected into the system prompt at every startup, so the agent
+already "knows you" before the first message.
+
+```
+you › 记住我叫赖天宇，喜欢魂系游戏，周末才有时间玩
+deckmind › 好的，记下来啦。
+
+[exit, reopen, even reboot]
+
+you › 推荐一个我现在能玩的
+deckmind › 看你喜欢魂系，加上时间紧 — 试试 Sekiro，单局节奏快。
+```
+
+You can also hand-edit `~/.deckmind/profile.json` — it's plain JSON.
+
+## Self-update
+
+The agent can pull its own latest commits from GitHub:
+
+```
+you › 检查更新           → calls check_for_updates (read-only)
+deckmind › 落后 3 个提交，新内容：...
+
+you › 拉一下             → calls apply_update(confirm=false)
+deckmind › 预览：从 abc → def，3 个提交。要执行吗？
+you › 确认
+deckmind › ✓ pulled + uv synced. 退出后重启 agent 加载新代码。
+```
+
+Safety constraints:
+- Only operates inside the project directory.
+- Pulls from whichever `origin` is already configured (the LLM can't
+  redirect to another URL — the tool doesn't accept one).
+- `git pull --ff-only`, so divergent histories fail loudly instead of
+  silently merging.
+- Hard-refuses when tracked files have uncommitted edits. Untracked
+  files (e.g. `uv.lock`) are left alone and don't block.
+
+## Notion logbook
+
+Log play sessions to your Notion database. Three steps to set up:
+
+1. **Get a token** — create an *Internal Integration* at
+   https://www.notion.so/profile/integrations, copy the `ntn_…` secret.
+2. **Set the env var** with `nano ~/.bashrc` (NEVER paste the token
+   into the agent or any chat — it'd be leaked to the LLM provider's
+   logs):
+   ```bash
+   export NOTION_API_KEY=ntn_xxxxx
+   ```
+   Then `source ~/.bashrc` and restart `deckmind`.
+3. **Share a database** with the integration in Notion (database
+   page → `⋯` → Connections → search "DeckMind" → add).
+
+That's it — **no `NOTION_DATABASE_ID` needed**. When you say "绑定
+notion" / "connect notion", `notion_status` auto-discovers:
+
+- **1 shared database** → silently picks it, persisted to
+  `~/.deckmind/notion.json`.
+- **2+ databases** → lists them and asks which to use, then calls
+  `notion_set_default_database`.
+- **0 databases** → tells you to share one first.
+
+Schema is matched by **field type**, not name — any database with at
+least a Title, a Number, a Date (and optionally a Rich Text field for
+notes) works.
+
+```
+you › 记一笔我刚玩了 1 小时 Hades
+deckmind › ✓ 已记录：Hades · 60 分钟 · 今天
+
+you › 这周玩了多久
+deckmind › 本周共 8.5 小时。排行：Hades 4h、Stardew 2h、CS2 1.5h。
+```
+
+## What you see at runtime (UI)
+
+```
+you ›                  ← cyan, bold (your input)
+deckmind ›             ← green, bold (agent reply, streamed token-by-token)
+  · tool_name…         ← dim yellow (quiet mode tool indicator)
+  ! refused: ...       ← dim red (only on errors/refusals)
+  ↳ 耗时 1.8s  ·  本轮 提示 9,810 + 回复 192 tokens  ·  累计 ...  ·  模型 deepseek-chat
+                       ← dim grey (footer, every reply)
+```
+
+- **Streaming**: text appears character-by-character as the model
+  generates it. No more waiting for whole paragraphs.
+- **Footer**: shows wall-clock seconds + this turn's tokens + lifetime
+  session totals + which model.
+- **Colors**: respect the `NO_COLOR` env var convention and auto-disable
+  when stdout isn't a TTY (so piping to a file stays clean).
+- **`-v` flag**: verbose mode shows full `▸ tool: name({args})` + raw
+  result dicts. Default mode hides those.
 
 ## Example session
 
