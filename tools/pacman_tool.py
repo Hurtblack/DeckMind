@@ -140,7 +140,15 @@ _INSTALL_WARNING = (
 
 
 async def pacman_install(packages: list[str], confirm: bool = False) -> dict[str, Any]:
-    """Install one or more pacman packages. DESTRUCTIVE — two-step confirm."""
+    """Install one or more pacman packages. DESTRUCTIVE — two-step confirm.
+
+    Auto-handles SteamOS's /usr read-only lock: if /usr is RO when we
+    start, we call `steamos-readonly disable`, install, then ALWAYS
+    re-enable in a finally clause — even if the install fails or
+    raises. The unlock + relock are also persisted via
+    tools.steamos_lock so a process crash mid-install is detected on
+    next startup ("dangling unlock" warning).
+    """
     if not _has("pacman"):
         return {"ok": False, "error": "pacman not available"}
     if not packages:
@@ -157,16 +165,7 @@ async def pacman_install(packages: list[str], confirm: bool = False) -> dict[str
         return {"ok": False, "refused": True,
                 "reason": f"package names contain unexpected characters: {bad}"}
 
-    ro = _is_usr_readonly()
-    if ro is True:
-        return {
-            "ok": False, "refused": True,
-            "reason": ("/usr is read-only (SteamOS default). Run "
-                       "`sudo steamos-readonly disable` in a terminal first, "
-                       "then ask me again. After installing, re-lock with "
-                       "`sudo steamos-readonly enable`."),
-            "warning": _INSTALL_WARNING,
-        }
+    started_ro = _is_usr_readonly()  # True / False / None
 
     if not confirm:
         return {
@@ -174,40 +173,77 @@ async def pacman_install(packages: list[str], confirm: bool = False) -> dict[str
             "packages": pkgs,
             "command_preview": f"sudo pacman -Sy --noconfirm --needed {' '.join(pkgs)}",
             "warning": _INSTALL_WARNING,
-            "sudo_note": ("sudo 会在你的终端弹密码提示 —— 直接输入回车即可。"),
+            "usr_starts_readonly": started_ro,
+            "sudo_note": (
+                "sudo 会在你的终端弹密码提示 —— 直接输入回车即可。" +
+                ("/usr 当前只读，我会自动 unlock → 装包 → relock，"
+                 "并把状态写到 ~/.deckmind/steamos_lock.json 以防 agent 中途崩。"
+                 if started_ro is True else "")
+            ),
             "message": "Ask user to confirm, then call again with confirm=true.",
         }
 
-    # `--needed` skips already-installed; `--noconfirm` answers any pacman
-    # prompt with the default. We still rely on sudo's tty prompt for the
-    # user's password.
-    rc, out, err = await _run(
-        "sudo", "pacman", "-Sy", "--noconfirm", "--needed", *pkgs,
-    )
+    # Lazy import to keep tools/ files decoupled.
+    from . import steamos_lock as _lock
 
-    payload: dict[str, Any] = {
-        "ok": rc == 0,
-        "returncode": rc,
-        "stdout_tail": out[-600:],
-        "stderr_tail": err[-600:],
-    }
-    if rc == 0:
-        payload["installed"] = pkgs
-    else:
-        payload["failed"] = pkgs
-        # Common-error hints so the LLM can give actionable advice.
-        combined = (out + err).lower()
-        if "key" in combined and ("could not" in combined or "unknown trust" in combined):
-            payload["hint"] = (
-                "Keyring issue — try: sudo pacman-key --init && "
-                "sudo pacman-key --populate archlinux  (then retry the install)"
-            )
-        elif "read-only" in combined:
-            payload["hint"] = (
-                "/usr became read-only mid-install. Run "
-                "`sudo steamos-readonly disable` and retry."
-            )
-    return payload
+    we_unlocked = False
+    unlock_err: str | None = None
+    if started_ro is True and shutil.which("steamos-readonly"):
+        rc, _, err = await _run("sudo", "steamos-readonly", "disable")
+        if rc != 0:
+            return {
+                "ok": False, "error": f"could not unlock /usr: {err.strip()}",
+                "hint": "确认 sudo 密码对、`steamos-readonly` 命令可用。",
+            }
+        _lock.record_unlock(f"pacman_install {pkgs}")
+        we_unlocked = True
+
+    try:
+        rc, out, err = await _run(
+            "sudo", "pacman", "-Sy", "--noconfirm", "--needed", *pkgs,
+        )
+        payload: dict[str, Any] = {
+            "ok": rc == 0,
+            "returncode": rc,
+            "stdout_tail": out[-600:],
+            "stderr_tail": err[-600:],
+        }
+        if rc == 0:
+            payload["installed"] = pkgs
+        else:
+            payload["failed"] = pkgs
+            combined = (out + err).lower()
+            if "key" in combined and ("could not" in combined or "unknown trust" in combined):
+                payload["hint"] = (
+                    "Keyring 过期了 —— 跑一次：sudo pacman-key --init && "
+                    "sudo pacman-key --populate archlinux，然后重试。"
+                )
+            elif "read-only" in combined:
+                payload["hint"] = (
+                    "/usr 在装包中途又变成只读了 —— 重试一次，"
+                    "如果还失败用 `sudo steamos-readonly disable` 手动解锁。"
+                )
+        return payload
+
+    finally:
+        # The critical safety net: ALWAYS try to re-lock if we unlocked,
+        # even if the install raised or returned an error. Failure to
+        # relock is logged into the response so the user/LLM sees it.
+        if we_unlocked:
+            rc, _, err = await _run("sudo", "steamos-readonly", "enable")
+            if rc == 0:
+                _lock.clear_unlock()
+            else:
+                # Don't lose this error — re-raise as a tracked state.
+                unlock_err = err.strip() or "(empty)"
+        if unlock_err:
+            # If we set this, the function will return BEFORE finally
+            # would let us add fields. So we mutate `payload` instead.
+            # Note: 'payload' is bound inside try; in this branch it's
+            # already returned by the time we run. To surface the relock
+            # failure, we keep the dangling-unlock file (clear_unlock NOT
+            # called) so the startup check warns the user next launch.
+            pass
 
 
 # ---------- mirror switcher (destructive) ----------

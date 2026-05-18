@@ -128,6 +128,22 @@ async def gather_context() -> dict[str, Any]:
     from .profile import load_profile
     ctx["user_profile"] = load_profile()
 
+    # SteamOS dangling-unlock check: if a previous pacman_install left
+    # /usr unlocked (e.g. agent crashed), surface it loudly so the LLM
+    # can tell the user to relock. Best-effort; non-Linux gives None.
+    try:
+        from tools.steamos_lock import is_usr_readonly, load_state
+        ro = is_usr_readonly()
+        record = load_state()
+        if record and ro is False:
+            ctx["steamos_dangling_unlock"] = {
+                "unlocked_at": record.get("unlocked_by_us_at"),
+                "reason": record.get("reason"),
+            }
+    except Exception:
+        # Never let a context-collection failure block agent startup.
+        pass
+
     # Flatpak apps (Steam Deck users install most extra software this way).
     if shutil.which("flatpak"):
         rc, out = await _run(
@@ -169,6 +185,15 @@ def format_context_for_prompt(ctx: dict[str, Any]) -> str:
             f"Disk /home: {d['used']} used / {d['size']} total "
             f"({d['percent']} full, {d['free']} free)"
         )
+
+    danger = ctx.get("steamos_dangling_unlock")
+    if danger:
+        lines.append("")
+        lines.append("⚠️ STEAMOS DANGLING UNLOCK DETECTED")
+        lines.append(f"  We unlocked /usr at {danger.get('unlocked_at')} "
+                     f"for reason: {danger.get('reason')}")
+        lines.append("  /usr is STILL unlocked. Tell the user this and offer "
+                     "to call steamos_lock to re-lock right now.")
 
     games = ctx.get("steam_games") or []
     if games:

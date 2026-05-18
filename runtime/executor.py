@@ -42,6 +42,10 @@ RISK_SAFE: set[str] = {
     "read_text_file",
     # Pacman search — read-only query.
     "pacman_search",
+    # SteamOS lock-state query (read-only).
+    "steamos_lock_status",
+    # Re-locking /usr is reverting to the SAFE default — no prompt.
+    "steamos_lock",
     # Profile read/write: only touches a small user-owned JSON file.
     # Prompting before every "记住我叫 X" would ruin the conversation.
     "remember",
@@ -71,6 +75,8 @@ RISK_SIDE_EFFECT: set[str] = {
     # Creates a brand-new page (subpage) in Notion — strongest write of
     # the set. Same [y/n/a] gate keeps batch reports tolerable.
     "notion_create_page",
+    # Manual SteamOS unlock — explicit user action; let them confirm.
+    "steamos_unlock",
 }
 
 RISK_DESTRUCTIVE: set[str] = {

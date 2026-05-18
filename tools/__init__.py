@@ -16,7 +16,8 @@ from llm import ToolSpec
 
 from . import (
     file_tool, file_write_tool, macro_tool, notion_tool, package_tool,
-    pacman_tool, profile_tool, steam_tool, system_tool, update_tool,
+    pacman_tool, profile_tool, steam_tool, steamos_lock as steamos_lock_tool,
+    system_tool, update_tool,
 )
 
 
@@ -197,6 +198,54 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
                     "confirm": {"type": "boolean", "default": False},
                 },
                 "required": ["packages"],
+            },
+        ),
+    ),
+    "steamos_lock_status": (
+        steamos_lock_tool.steamos_lock_status,
+        ToolSpec(
+            name="steamos_lock_status",
+            description=(
+                "Report whether /usr is read-only on this SteamOS device, "
+                "AND whether we have a 'dangling unlock' (we previously "
+                "called disable but never enabled back). Use first when "
+                "the user mentions unlock/relock/pacman state."
+            ),
+            parameters={"type": "object", "properties": {}},
+        ),
+    ),
+    "steamos_lock": (
+        steamos_lock_tool.steamos_lock,
+        ToolSpec(
+            name="steamos_lock",
+            description=(
+                "Re-enable SteamOS's /usr read-only protection (runs "
+                "`sudo steamos-readonly enable`) and clear any dangling "
+                "unlock record. Use when steamos_lock_status reports "
+                "dangling_unlock=true, or when the user says '锁回去' / "
+                "'re-lock /usr'."
+            ),
+            parameters={"type": "object", "properties": {}},
+        ),
+    ),
+    "steamos_unlock": (
+        steamos_lock_tool.steamos_unlock,
+        ToolSpec(
+            name="steamos_unlock",
+            description=(
+                "Disable SteamOS's /usr read-only protection (runs "
+                "`sudo steamos-readonly disable`) and persist a record "
+                "of the unlock. ONLY use this when the user explicitly "
+                "asks to manually unlock — pacman_install handles the "
+                "unlock/relock automatically, so you almost never need "
+                "to call this directly."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "reason": {"type": "string",
+                               "description": "Short reason for the record"},
+                },
             },
         ),
     ),
