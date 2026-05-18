@@ -5,5 +5,15 @@ description = "Minimal local LLM agent for Steam Deck / Linux."
 requires-python = ">=3.11"
 dependencies = [
     "openai>=1.51.0",
-    "pynput>=1.7.7",
 ]
+
+# pynput is optional because:
+#   1. On Wayland (SteamOS desktop + Game Mode) it cannot inject key events
+#      anyway — the macro tool degrades to a mock when pynput is missing.
+#   2. Building it from source on SteamOS fails (no kernel headers).
+# Install it manually with `uv sync --extra macros` if you really want
+# to try macros — works only on X11 sessions and only if your distro has
+# kernel headers (so evdev can compile), or if `evdev-binary` is on PyPI
+# with a wheel for your platform.
+[project.optional-dependencies]
+macros = ["pynput>=1.7.7"]

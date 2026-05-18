@@ -163,11 +163,15 @@ chmod +x ~/DeckMind/run-agent.sh
 
 ### Known Steam Deck limitations
 
-- **Macros (`press_key`, `start_key_loop`)** use `pynput`, which is X11-only.
-  SteamOS uses Wayland (KDE on Wayland in Desktop Mode, Gamescope in Game
-  Mode), so key injection into games will silently no-op. Workaround: swap
-  the macro backend to `ydotool` (open an issue if you want this — it's a
-  small change to [tools/macro_tool.py](tools/macro_tool.py)).
+- **Macros are off by default on the Deck.** The `pynput` library that
+  powers `press_key` / `start_key_loop` needs the `evdev` C extension,
+  which fails to build on SteamOS (no kernel headers — the `/usr` tree
+  is immutable). Even if it did install, pynput cannot inject keys into
+  Wayland sessions (KDE Plasma in Desktop Mode, Gamescope in Game Mode),
+  so it'd be a no-op anyway. With pynput absent, macro tools return a
+  harmless mock result. To actually enable macros, switch the backend
+  to `ydotool` — open an issue or PR; it's a small change to
+  [tools/macro_tool.py](tools/macro_tool.py).
 - **Steam launch** requires the `steam` client to be running. In Game Mode
   it always is; in Desktop Mode start Steam first.
 - **Battery device** on the Deck is `BAT1` (not `BAT0`). The code

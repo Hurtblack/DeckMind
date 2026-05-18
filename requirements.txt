@@ -1,2 +1,5 @@
 openai>=1.51.0
-pynput>=1.7.7
+# pynput is optional — see pyproject.toml's [project.optional-dependencies].
+# Uncomment if you want macro key-injection AND your system can build evdev
+# (kernel headers installed). Does not work on Wayland sessions.
+# pynput>=1.7.7

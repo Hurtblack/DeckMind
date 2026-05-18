@@ -159,11 +159,12 @@ chmod +x ~/DeckMind/run-agent.sh
 
 ### Steam Deck 已知的两个限制
 
-- **宏（`press_key`、`start_key_loop`）** 当前后端是 `pynput`，只支持 X11。
-  SteamOS 桌面模式是 KDE on Wayland，游戏模式是 Gamescope（也算 Wayland），
-  按键注入会静默失效（API 返回 `ok: true` 但游戏里没反应）。
-  解决办法是换成 `ydotool` —— 这个改动很小，集中在
-  [tools/macro_tool.py](tools/macro_tool.py) 一个文件，需要的话提个 issue。
+- **宏默认在 Deck 上不启用。** `pynput` 依赖的 `evdev` C 扩展需要内核头文件，
+  而 SteamOS 的 `/usr` 是只读的、不带 headers，所以编译会失败。退一步即使装上
+  了，pynput 也无法往 Wayland 会话（桌面模式 KDE Plasma、游戏模式 Gamescope）
+  注入按键 —— 本来就是空转。所以 pynput 没装时，宏类工具会返回无害的 mock
+  结果。真正要启用宏，把后端换成 `ydotool` —— 提个 issue / PR 即可，
+  改动很小，就在 [tools/macro_tool.py](tools/macro_tool.py) 一个文件。
 - **启动游戏** 要求 Steam 客户端已经在跑。游戏模式下它一直在跑；桌面模式记得
   先打开 Steam。
 - **电池设备** Deck 上是 `BAT1`（不是 `BAT0`），代码会自动识别两种。
