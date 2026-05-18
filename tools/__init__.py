@@ -15,8 +15,8 @@ from typing import Any, Awaitable, Callable
 from llm import ToolSpec
 
 from . import (
-    file_tool, macro_tool, notion_tool, package_tool, profile_tool,
-    steam_tool, system_tool, update_tool,
+    file_tool, file_write_tool, macro_tool, notion_tool, package_tool,
+    profile_tool, steam_tool, system_tool, update_tool,
 )
 
 
@@ -210,6 +210,59 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
                                "description": "Optional substring filter"},
                     "limit": {"type": "integer", "default": 30},
                 },
+            },
+        ),
+    ),
+    "read_text_file": (
+        file_write_tool.read_text_file,
+        ToolSpec(
+            name="read_text_file",
+            description=(
+                "Read a small text file (up to 64 KB). Useful for "
+                "inspecting configs the user mentioned — autostart "
+                ".desktop entries, ~/.bashrc, ~/.config/<app>/*.toml, "
+                "/etc/os-release etc. Refuses ~/.ssh, ~/.gnupg, anything "
+                "containing 'secret'/'credential'/'id_rsa' style names, "
+                "and refuses to follow symlinks."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "max_bytes": {"type": "integer", "default": 16384,
+                                  "description": "Truncate at this many bytes (hard cap 65536)"},
+                },
+                "required": ["path"],
+            },
+        ),
+    ),
+    "write_text_file": (
+        file_write_tool.write_text_file,
+        ToolSpec(
+            name="write_text_file",
+            description=(
+                "Write text content to a file. DESTRUCTIVE — call first "
+                "with confirm=false for a dry-run preview, then with "
+                "confirm=true after the user explicitly approves.\n"
+                "Allowed paths (writes outside refused):\n"
+                "  ~/.config/autostart/   — KDE/GNOME autostart .desktop\n"
+                "  ~/.config/systemd/user/— user systemd services\n"
+                "  ~/.local/share/applications/ — custom .desktop entries\n"
+                "  ~/.deckmind/           — our own config dir\n"
+                "  ~/Documents/ ~/Desktop/ ~/Downloads/\n"
+                "Refuses ~/.ssh / ~/.gnupg / credential-like paths even "
+                "inside those bases. Refuses symlinks. Max content 100 KB.\n"
+                "Typical use: create an autostart .desktop for an AppImage."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string",
+                             "description": "Destination path, ~ expansion supported"},
+                    "content": {"type": "string"},
+                    "confirm": {"type": "boolean", "default": False},
+                },
+                "required": ["path", "content"],
             },
         ),
     ),

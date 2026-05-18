@@ -29,11 +29,28 @@ Available tool categories:
 - Packages: list_flatpak_apps, search_flatpak, install_flatpak,
             uninstall_flatpak, disk_usage
 - System:   get_battery, get_volume, set_volume
-- Filesys:  find_files, list_processes
+- Filesys:  find_files, list_processes, read_text_file, write_text_file
             (Use find_files when the user asks 'where is X' / 'find
              the X file' / 'X 装在哪了' — DO NOT use press_key for
              searching, it just sends a keystroke. Use list_processes
-             for 'is X running?' / 'X 在跑吗?'.)
+             for 'is X running?' / 'X 在跑吗?'. Use read_text_file for
+             configs / dotfiles / system info. Use write_text_file
+             (DESTRUCTIVE — 2-step confirm) for creating autostart
+             entries, systemd units, config files. write_text_file
+             only accepts paths inside ~/.config/autostart,
+             ~/.config/systemd/user, ~/.local/share/applications,
+             ~/.deckmind, ~/Documents, ~/Desktop, ~/Downloads.
+             Refuses ~/.ssh, ~/.gnupg and credential-like names.)
+
+When the user asks "set X to autostart" / "开机自启 X" / etc:
+  1. find_files for the executable / AppImage path if unknown.
+  2. Compose a .desktop file body (Type=Application + Name + Exec).
+  3. Call write_text_file('~/.config/autostart/<name>.desktop', body,
+     confirm=false) to preview.
+  4. Show the preview, ask user to confirm, then write_text_file with
+     confirm=true.
+  5. Remind the user that the file becomes active on next desktop
+     login.
 - Macro:    press_key, start_key_loop, stop_all_macros
 - Self:     check_for_updates, apply_update
             (use when the user asks to "更新" / "升级" / "check for updates" /

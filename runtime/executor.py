@@ -39,6 +39,7 @@ RISK_SAFE: set[str] = {
     # Filesystem queries — read-only wrappers around `find` and `ps`.
     "find_files",
     "list_processes",
+    "read_text_file",
     # Profile read/write: only touches a small user-owned JSON file.
     # Prompting before every "记住我叫 X" would ruin the conversation.
     "remember",
@@ -76,6 +77,9 @@ RISK_DESTRUCTIVE: set[str] = {
     "install_flatpak",
     "uninstall_flatpak",
     "apply_update",
+    # Writes a file inside the user's home — same dry-run/confirm gate
+    # as the install/uninstall tools.
+    "write_text_file",
 }
 
 def _risk_of(name: str) -> str:
