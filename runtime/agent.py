@@ -28,6 +28,7 @@ from memory import SessionMemory
 from .context import format_context_for_prompt, gather_context
 from .executor import Executor
 from .planner import Planner
+from . import ui
 
 
 MAX_STEPS = 8  # Hard cap to prevent runaway tool-calling.
@@ -58,21 +59,21 @@ class Agent:
 
     def _print_tool_start(self, name: str, args: dict) -> None:
         if self.verbose:
-            print(f"  ▸ tool: {name}({args})")
+            print(ui.tool_line(f"  ▸ tool: {name}({args})"))
         else:
             # Quiet mode: a single one-line hint so the user knows
             # something is happening without seeing the raw call.
-            print(f"  · {name}…")
+            print(ui.tool_line(f"  · {name}…"))
 
     def _print_tool_result(self, result: dict) -> None:
         if self.verbose:
-            print(f"    ↳ {result}")
+            print(ui.tool_line(f"    ↳ {result}"))
         else:
             # Surface errors / refusals only — successes stay quiet.
             if not result.get("ok", True):
                 msg = result.get("message") or result.get("reason") or result.get("error")
                 if msg:
-                    print(f"    ! {msg}")
+                    print(ui.error_line(f"    ! {msg}"))
 
     # ----- main loop -----
 
@@ -92,7 +93,7 @@ class Agent:
         def stream_to_stdout(fragment: str) -> None:
             nonlocal prefix_printed
             if not prefix_printed:
-                sys.stdout.write("deckmind> ")
+                sys.stdout.write(ui.agent_prefix("deckmind ›") + " ")
                 prefix_printed = True
             sys.stdout.write(fragment)
             sys.stdout.flush()
@@ -148,16 +149,21 @@ class Agent:
             print(note)
             reply_parts.append(note)
 
-        # Update lifetime totals and print a faint footer with this
-        # turn's spend + the running session total.
+        # Update lifetime totals and print a footer with this turn's
+        # token spend + the running session total. Uses thousands
+        # separators and Chinese labels so the meaning is obvious.
         self.total_input_tokens += turn_input
         self.total_output_tokens += turn_output
         if turn_input or turn_output:
-            print(
-                f"  \x1b[2m· {self.model}  |  this turn: "
-                f"{turn_input} in / {turn_output} out  |  session: "
-                f"{self.total_input_tokens} in / {self.total_output_tokens} out\x1b[0m"
-            )
+            print(ui.footer(
+                f"  ↳ 本轮 提示 {turn_input:,} + 回复 {turn_output:,} tokens"
+                f"  ·  累计 提示 {self.total_input_tokens:,} + 回复 {self.total_output_tokens:,}"
+                f"  ·  模型 {self.model}"
+            ))
+
+        # Blank line between turns so the next `you ›` prompt visually
+        # separates from this reply.
+        print()
 
         full_reply = "".join(reply_parts).strip()
         if full_reply:

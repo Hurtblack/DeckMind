@@ -16,6 +16,7 @@ import sys
 
 from llm import PROVIDERS
 from runtime import Agent
+from runtime import ui
 
 
 BANNER = "SteamDeckAgent — type a request, or `exit` to quit."
@@ -50,11 +51,12 @@ async def repl(verbose: bool) -> None:
     print(f"{BANNER}  [{provider} · {agent.model} · {mode}]")
 
     loop = asyncio.get_running_loop()
+    user_label = ui.user_prompt("you ›") + " "
     while True:
         try:
             # Run blocking input() off the event loop so background
             # macro tasks (start_key_loop) keep ticking while we wait.
-            line = await loop.run_in_executor(None, lambda: input("you> "))
+            line = await loop.run_in_executor(None, lambda: input(user_label))
         except (EOFError, KeyboardInterrupt):
             print()
             break
