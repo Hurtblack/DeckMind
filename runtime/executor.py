@@ -35,6 +35,7 @@ RISK_SAFE: set[str] = {
     "list_flatpak_apps",
     "search_flatpak",
     "disk_usage",
+    "check_for_updates",
 }
 
 RISK_SIDE_EFFECT: set[str] = {
@@ -51,6 +52,7 @@ RISK_DESTRUCTIVE: set[str] = {
     "uninstall_game",
     "install_flatpak",
     "uninstall_flatpak",
+    "apply_update",
 }
 
 def _risk_of(name: str) -> str:

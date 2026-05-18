@@ -14,7 +14,7 @@ from typing import Any, Awaitable, Callable
 
 from llm import ToolSpec
 
-from . import macro_tool, package_tool, steam_tool, system_tool
+from . import macro_tool, package_tool, steam_tool, system_tool, update_tool
 
 
 # Every tool is an async callable returning a dict.
@@ -160,6 +160,37 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
             name="disk_usage",
             description="Show human-readable disk usage for / and /home.",
             parameters={"type": "object", "properties": {}},
+        ),
+    ),
+    "check_for_updates": (
+        update_tool.check_for_updates,
+        ToolSpec(
+            name="check_for_updates",
+            description=(
+                "Fetch from the project's git origin and report whether "
+                "a newer commit is available. Read-only, safe."
+            ),
+            parameters={"type": "object", "properties": {}},
+        ),
+    ),
+    "apply_update": (
+        update_tool.apply_update,
+        ToolSpec(
+            name="apply_update",
+            description=(
+                "Pull the latest code from origin (fast-forward only) and "
+                "run `uv sync`. DESTRUCTIVE — call first with confirm=false "
+                "for a dry-run preview, then with confirm=true after the "
+                "user explicitly approves. Refuses if there are uncommitted "
+                "local changes. The new code only takes effect after the "
+                "user restarts the agent."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "confirm": {"type": "boolean", "default": False},
+                },
+            },
         ),
     ),
     "get_battery": (

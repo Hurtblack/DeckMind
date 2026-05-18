@@ -30,6 +30,10 @@ Available tool categories:
             uninstall_flatpak, disk_usage
 - System:   get_battery, get_volume, set_volume
 - Macro:    press_key, start_key_loop, stop_all_macros
+- Self:     check_for_updates, apply_update
+            (use when the user asks to "更新" / "升级" / "check for updates" /
+             "拉一下最新版" etc. After apply_update succeeds, remind the
+             user to exit and relaunch the agent.)
 
 Use the DEVICE CONTEXT block below to answer questions WITHOUT calling
 a tool when you already have the information (which games are installed,
