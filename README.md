@@ -111,9 +111,28 @@ uv run python main.py
 Try:
 
 ```
-you> 查看当前电量
-you> 把音量调到 30%
-you> 打开 CS2
+you› 查看当前电量
+you› 把音量调到 30%
+you› 打开 CS2
+```
+
+### 7b. (Optional) Make it a one-word command
+
+Add a tiny shell function so you can launch from anywhere by typing
+`deckmind`:
+
+```bash
+echo 'deckmind() { (cd ~/DeckMind && uv run python ./main.py "$@"); }' >> ~/.bashrc
+echo 'deckmind-update() { (cd ~/DeckMind && git pull && uv sync); }'   >> ~/.bashrc
+source ~/.bashrc
+```
+
+Daily use after that:
+
+```bash
+deckmind                 # start the agent
+deckmind -v              # verbose / developer mode
+deckmind-update          # git pull + uv sync from anywhere
 ```
 
 ### 8. Launch from Game Mode (add as a non-Steam game)

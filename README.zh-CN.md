@@ -112,9 +112,27 @@ uv run python main.py
 试几条：
 
 ```
-you> 查看当前电量
-you> 把音量调到 30%
-you> 打开 CS2
+you› 查看当前电量
+you› 把音量调到 30%
+you› 打开 CS2
+```
+
+### 7b. （可选）压成一个命令
+
+往 `~/.bashrc` 加两个小 shell 函数，以后任意目录敲 `deckmind` 就能启动：
+
+```bash
+echo 'deckmind() { (cd ~/DeckMind && uv run python ./main.py "$@"); }' >> ~/.bashrc
+echo 'deckmind-update() { (cd ~/DeckMind && git pull && uv sync); }'   >> ~/.bashrc
+source ~/.bashrc
+```
+
+之后日常就这样：
+
+```bash
+deckmind                 # 启动 agent
+deckmind -v              # verbose / 开发者模式
+deckmind-update          # 任意目录 git pull + uv sync
 ```
 
 ### 8. 添加为"非 Steam 游戏"，从游戏模式启动
