@@ -304,5 +304,14 @@ class CommandToolExecutionFailureTests(unittest.TestCase):
         self.assertIn("failed to start command", result["error"])
 
 
+class CommandToolRegistryTests(unittest.TestCase):
+    def test_run_command_is_registered(self) -> None:
+        from tools import get, specs
+
+        self.assertIsNotNone(get("run_command"))
+        names = {spec.name for spec in specs()}
+        self.assertIn("run_command", names)
+
+
 if __name__ == "__main__":
     unittest.main()

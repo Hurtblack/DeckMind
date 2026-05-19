@@ -91,6 +91,8 @@ RISK_DESTRUCTIVE: set[str] = {
     # Pacman writes (require sudo + dirty /usr).
     "pacman_install",
     "set_pacman_mirror_china",
+    # Restricted command runner — still executes local user-level commands.
+    "run_command",
 }
 
 def _risk_of(name: str) -> str:

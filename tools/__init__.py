@@ -12,12 +12,12 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable
 
-from llm import ToolSpec
+from llm.base import ToolSpec
 
 from . import (
-    file_tool, file_write_tool, macro_tool, notion_tool, package_tool,
-    pacman_tool, profile_tool, steam_tool, steamos_lock as steamos_lock_tool,
-    system_tool, update_tool,
+    command_tool, file_tool, file_write_tool, macro_tool, notion_tool,
+    package_tool, pacman_tool, profile_tool, steam_tool,
+    steamos_lock as steamos_lock_tool, system_tool, update_tool,
 )
 
 
@@ -374,6 +374,36 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
                     "confirm": {"type": "boolean", "default": False},
                 },
                 "required": ["path", "content"],
+            },
+        ),
+    ),
+    "run_command": (
+        command_tool.run_command,
+        ToolSpec(
+            name="run_command",
+            description=(
+                "Run a restricted allowlisted user-level command. "
+                "DESTRUCTIVE — call first with confirm=false for a dry-run "
+                "preview, then with confirm=true after the user explicitly "
+                "approves. Does not use a shell. Allowed command families "
+                "include curl/wget downloads to approved user directories, "
+                "chmod +x on approved files, mkdir -p in approved directories, "
+                "file/which read-only checks, and systemctl --user for simple "
+                "user service actions. Never use for sudo, pacman, arbitrary "
+                "shell, credentials, system-level systemctl, pipes, redirects, "
+                "or compound commands."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "argv": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Command argv, e.g. ['which', 'sh']",
+                    },
+                    "confirm": {"type": "boolean", "default": False},
+                },
+                "required": ["argv"],
             },
         ),
     ),

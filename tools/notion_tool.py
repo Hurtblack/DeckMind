@@ -28,8 +28,6 @@ import os
 import pathlib
 from typing import Any
 
-import httpx  # bundled via the openai SDK; no extra install needed
-
 
 # Persisted default database — lives next to the user profile.
 _CONFIG_DIR = pathlib.Path.home() / ".deckmind"
@@ -86,6 +84,11 @@ async def _request(
     """Make a Notion API call. Returns (data, err) — exactly one is None."""
     if not _key():
         return None, {"ok": False, "error": "NOTION_API_KEY not set"}
+    try:
+        import httpx
+    except ImportError:
+        return None, {"ok": False, "error": "httpx not installed"}
+
     async with httpx.AsyncClient(timeout=20.0) as cli:
         try:
             r = await cli.request(method, f"{API_BASE}{path}",

@@ -16,8 +16,6 @@ from .base import (
     TextDeltaCallback,
     ToolSpec,
 )
-from .chat_completions_client import ChatCompletionsClient
-from .openai_client import OpenAIResponsesClient
 
 
 # Provider presets. Each entry tells the factory:
@@ -77,6 +75,8 @@ def make_client() -> LLMClient:
     model = os.environ.get("LLM_MODEL", cfg["default_model"])
 
     if cfg["client"] == "responses":
+        from .openai_client import OpenAIResponsesClient
+
         # OpenAI's own SDK auto-reads OPENAI_API_KEY; no extra wiring.
         return OpenAIResponsesClient(model=model)
 
@@ -86,6 +86,8 @@ def make_client() -> LLMClient:
         raise RuntimeError(
             f"Provider {name!r} requires env var {cfg['api_key_env']}"
         )
+    from .chat_completions_client import ChatCompletionsClient
+
     return ChatCompletionsClient(
         api_key=api_key,
         base_url=cfg["base_url"],
