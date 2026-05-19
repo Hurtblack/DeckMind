@@ -1,30 +1,26 @@
 """Installer/client helpers for the thin DeckMind Decky plugin.
 
-The plugin package stays small. The real agent runtime is installed under the
-user's home directory on first run, then upgraded independently.
+调试期：runtime 通过 git clone / git pull 直接从 GitHub 仓库拉取。
+发布期：可改回 tar.gz release 下载（保留代码以便切换）。
 """
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import os
 import shutil
-import tarfile
-import tempfile
-import urllib.error
-import urllib.request
+import subprocess
 from pathlib import Path
 from typing import Any
 
-DOWNLOAD_TIMEOUT = 30  # 秒：单次 HTTP 操作的上限
+GIT_TIMEOUT = 120  # 秒，单次 git 操作超时
 
 
-DEFAULT_RUNTIME_URL = (
-    "https://github.com/Hurtblack/DeckMind/releases/latest/download/"
-    "deckmind-runtime.tar.gz"
-)
+DEFAULT_RUNTIME_REPO = "https://github.com/Hurtblack/DeckMind.git"
+DEFAULT_BRANCH = "main"
+
+
 def _xdg_dir(env_var: str, default_subpath: str) -> Path:
     """遵循 XDG Base Directory 规范解析路径，支持环境变量覆盖。"""
     base = os.environ.get(env_var)
@@ -48,23 +44,22 @@ MANIFEST_NAME = "deckmind-runtime.json"
 
 
 class RuntimeInstaller:
-    """Installs and inspects the external DeckMind runtime."""
+    """通过 git 安装/更新 DeckMind runtime。"""
 
     def __init__(
         self,
         *,
         runtime_dir: Path = RUNTIME_HOME,
         cache_dir: Path = CACHE_HOME,
-        runtime_url: str | None = None,
-        runtime_sha256: str | None = None,
+        repo_url: str | None = None,
+        branch: str | None = None,
     ) -> None:
         self.runtime_dir = runtime_dir
         self.cache_dir = cache_dir
-        self.runtime_url = runtime_url or os.environ.get(
-            "DECKMIND_RUNTIME_URL",
-            DEFAULT_RUNTIME_URL,
+        self.repo_url = repo_url or os.environ.get(
+            "DECKMIND_RUNTIME_REPO", DEFAULT_RUNTIME_REPO
         )
-        self.runtime_sha256 = runtime_sha256 or os.environ.get("DECKMIND_RUNTIME_SHA256")
+        self.branch = branch or os.environ.get("DECKMIND_RUNTIME_BRANCH", DEFAULT_BRANCH)
 
     @property
     def manifest_path(self) -> Path:
@@ -78,6 +73,18 @@ class RuntimeInstaller:
         except (OSError, json.JSONDecodeError):
             return {}
 
+    def _git_commit(self) -> str | None:
+        """读 runtime_dir 当前 commit hash，失败返回 None。"""
+        try:
+            out = subprocess.check_output(
+                ["git", "-C", str(self.runtime_dir), "rev-parse", "--short", "HEAD"],
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            return out.decode().strip()
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+            return None
+
     def status(self) -> dict[str, Any]:
         manifest = self._manifest()
         entrypoint = self.runtime_dir / "main.py"
@@ -87,101 +94,97 @@ class RuntimeInstaller:
             "installed": installed,
             "runtime_dir": str(self.runtime_dir),
             "version": manifest.get("version"),
+            "commit": self._git_commit(),
             "entrypoint": str(entrypoint),
-            "runtime_url": self.runtime_url,
+            "repo_url": self.repo_url,
+            "branch": self.branch,
         }
 
-    def _sha256(self, path: Path) -> str:
-        digest = hashlib.sha256()
-        with path.open("rb") as f:
-            for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
-
-    def _download(self) -> Path:
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        target = self.cache_dir / "deckmind-runtime.tar.gz"
+    def _run_git(self, args: list[str], cwd: Path | None = None) -> str:
+        """跑 git 命令，捕获 stdout+stderr，超时/失败抛 RuntimeError。"""
         try:
-            req = urllib.request.Request(
-                self.runtime_url,
-                headers={"User-Agent": "DeckMind-Installer"},
+            result = subprocess.run(
+                ["git", *args],
+                cwd=str(cwd) if cwd else None,
+                capture_output=True,
+                text=True,
+                timeout=GIT_TIMEOUT,
+                check=False,
             )
-            with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT) as resp, \
-                    target.open("wb") as out:
-                shutil.copyfileobj(resp, out)
-        except urllib.error.HTTPError as e:
-            target.unlink(missing_ok=True)
+        except FileNotFoundError as e:
+            raise RuntimeError("系统未安装 git，请先 sudo pacman -S git") from e
+        except subprocess.TimeoutExpired as e:
             raise RuntimeError(
-                f"下载 runtime 失败：HTTP {e.code} {e.reason}（URL: {self.runtime_url}）。"
-                f"请确认 GitHub Release 已发布，或设置 DECKMIND_RUNTIME_URL 指向自定义地址。"
+                f"git 操作超时（{GIT_TIMEOUT}s），可能网络不通"
             ) from e
-        except urllib.error.URLError as e:
-            target.unlink(missing_ok=True)
+        if result.returncode != 0:
             raise RuntimeError(
-                f"下载 runtime 网络错误：{e.reason}（URL: {self.runtime_url}）。"
-                f"请检查网络连通性或访问 GitHub 的能力。"
-            ) from e
-        except TimeoutError:
-            target.unlink(missing_ok=True)
-            raise RuntimeError(
-                f"下载 runtime 超时（{DOWNLOAD_TIMEOUT}s）。请检查网络。"
+                f"git {' '.join(args)} 失败:\n{result.stderr.strip() or result.stdout.strip()}"
             )
-        if self.runtime_sha256:
-            actual = self._sha256(target)
-            if actual.lower() != self.runtime_sha256.lower():
-                target.unlink(missing_ok=True)
-                raise RuntimeError(
-                    f"runtime sha256 mismatch: expected {self.runtime_sha256}, got {actual}"
-                )
-        return target
+        return result.stdout
 
     def install(self) -> dict[str, Any]:
-        archive = self._download()
+        """首次安装 (git clone) 或更新 (git pull)。"""
         parent = self.runtime_dir.parent
         parent.mkdir(parents=True, exist_ok=True)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        with tempfile.TemporaryDirectory(prefix="deckmind-runtime-", dir=str(parent)) as tmp:
-            tmp_dir = Path(tmp)
-            with tarfile.open(archive, "r:gz") as tar:
-                tar.extractall(tmp_dir)
+        git_dir = self.runtime_dir / ".git"
 
-            extracted_root = tmp_dir
-            children = [p for p in tmp_dir.iterdir()]
-            if len(children) == 1 and children[0].is_dir():
-                extracted_root = children[0]
-
-            next_dir = parent / f"{self.runtime_dir.name}.next"
-            if next_dir.exists():
-                shutil.rmtree(next_dir)
-            shutil.copytree(extracted_root, next_dir)
-
+        if self.runtime_dir.exists() and git_dir.exists():
+            # 已是 git 仓库 → pull 更新
+            action = "pulled"
+            self._run_git(["fetch", "origin", self.branch], cwd=self.runtime_dir)
+            self._run_git(["reset", "--hard", f"origin/{self.branch}"], cwd=self.runtime_dir)
+        else:
+            # 目录已存在但不是 git 仓库 → 备份再 clone
             if self.runtime_dir.exists():
-                shutil.rmtree(self.runtime_dir)
-            next_dir.rename(self.runtime_dir)
+                backup = self.runtime_dir.with_suffix(".bak")
+                if backup.exists():
+                    shutil.rmtree(backup)
+                self.runtime_dir.rename(backup)
+            action = "cloned"
+            self._run_git(
+                [
+                    "clone",
+                    "--depth", "1",
+                    "--branch", self.branch,
+                    self.repo_url,
+                    str(self.runtime_dir),
+                ]
+            )
 
-        manifest = self._manifest()
-        if "version" not in manifest:
-            manifest = {"version": "unknown", "source": self.runtime_url}
-            self.manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        commit = self._git_commit() or "unknown"
+        manifest = {
+            "version": commit,
+            "source": self.repo_url,
+            "branch": self.branch,
+            "action": action,
+        }
+        self.manifest_path.write_text(
+            json.dumps(manifest, indent=2), encoding="utf-8"
+        )
 
         return {
             "ok": True,
             "installed": True,
+            "action": action,
             "runtime_dir": str(self.runtime_dir),
-            "version": manifest.get("version"),
+            "commit": commit,
+            "branch": self.branch,
         }
 
     async def install_async(self) -> dict[str, Any]:
-        """从 async 上下文安全调用：在线程池里跑同步 install()，不阻塞事件循环。
-        任何异常被捕获，转成 {ok: False, error: ...}，UI 才能收到结构化反馈。"""
+        """从 async 上下文安全调用，不阻塞 Decky 事件循环。"""
         try:
             return await asyncio.to_thread(self.install)
         except Exception as e:
             return {
                 "ok": False,
-                "installed": False,
+                "installed": (self.runtime_dir / "main.py").exists(),
                 "error": str(e),
-                "runtime_url": self.runtime_url,
+                "repo_url": self.repo_url,
+                "branch": self.branch,
             }
 
 
