@@ -100,6 +100,28 @@ class RuntimeInstaller:
             "branch": self.branch,
         }
 
+    def _clean_env(self) -> dict[str, str]:
+        """剔除 Decky Loader (PyInstaller 打包) 注入的运行时环境变量。
+
+        Decky Loader 是 PyInstaller 单文件二进制，启动时把自带的旧 libssl/libcrypto
+        解压到 /tmp/_MEI*/，并通过 LD_LIBRARY_PATH 让自己加载它们。但 subprocess
+        会继承这些变量，导致 git/curl 等系统二进制加载到错误版本的库（典型表现：
+        `libssl.so.3: version 'OPENSSL_3.x.0' not found`）。
+
+        这里把 PyInstaller 相关的环境变量全部移除，让子进程使用系统默认库。
+        """
+        env = os.environ.copy()
+        for key in (
+            "LD_LIBRARY_PATH",
+            "LD_PRELOAD",
+            "PYTHONHOME",
+            "PYTHONPATH",
+            "_MEIPASS",
+            "_MEIPASS2",
+        ):
+            env.pop(key, None)
+        return env
+
     def _run_git(self, args: list[str], cwd: Path | None = None) -> str:
         """跑 git 命令，捕获 stdout+stderr，超时/失败抛 RuntimeError。"""
         try:
@@ -110,6 +132,7 @@ class RuntimeInstaller:
                 text=True,
                 timeout=GIT_TIMEOUT,
                 check=False,
+                env=self._clean_env(),
             )
         except FileNotFoundError as e:
             raise RuntimeError("系统未安装 git，请先 sudo pacman -S git") from e
