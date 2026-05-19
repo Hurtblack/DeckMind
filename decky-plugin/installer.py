@@ -150,11 +150,11 @@ class RuntimeInstaller:
         return result.stdout
 
     def _find_system_python(self) -> str | None:
-        """找一个系统 Python 来跑 pip（避免用 Decky bundled 的、可能没 pip 的解释器）。"""
+        """找一个可用的系统 Python（能 import sys 即可，不要求 pip）。"""
         for candidate in ("/usr/bin/python3", "/usr/bin/python", "python3", "python"):
             try:
                 result = subprocess.run(
-                    [candidate, "-c", "import pip; print(pip.__version__)"],
+                    [candidate, "-c", "import sys; print(sys.version_info[:2])"],
                     capture_output=True,
                     text=True,
                     timeout=10,
@@ -166,29 +166,17 @@ class RuntimeInstaller:
                 continue
         return None
 
-    def _install_python_deps(self) -> dict[str, Any]:
-        """把 requirements.txt 装到 runtime/.vendor 里，runtime 启动时会 sys.path 这里。
-
-        失败不抛——返回 {ok: false, error: ...} 以便用户能看到 runtime 已安装
-        但缺依赖的状态，并手动重试。
-        """
-        req_file = self.runtime_dir / "requirements.txt"
-        if not req_file.exists():
-            return {"ok": True, "skipped": "no_requirements"}
-
-        vendor = self.runtime_dir / VENDOR_DIR_NAME
-        python = self._find_system_python()
-        if python is None:
-            return {
-                "ok": False,
-                "error": "未找到系统 Python（带 pip）。请在 Konsole 执行："
-                f" python3 -m pip install --target {vendor} -r {req_file}",
-            }
-
+    def _pip_install_to_vendor(
+        self,
+        pip_python: str,
+        vendor: Path,
+        req_file: Path,
+    ) -> tuple[bool, str]:
+        """用指定 Python 跑 pip install --target，返回 (ok, stderr/output)。"""
         try:
             result = subprocess.run(
                 [
-                    python, "-m", "pip", "install",
+                    pip_python, "-m", "pip", "install",
                     "--target", str(vendor),
                     "--upgrade",
                     "-r", str(req_file),
@@ -199,13 +187,149 @@ class RuntimeInstaller:
                 env=self._clean_env(),
             )
         except subprocess.TimeoutExpired:
-            return {"ok": False, "error": f"pip install 超时（{PIP_TIMEOUT}s）"}
-
+            return False, f"pip install 超时（{PIP_TIMEOUT}s）"
         if result.returncode != 0:
+            return False, (result.stderr.strip() or result.stdout.strip())
+        return True, result.stdout
+
+    def _ensure_venv_python(self, system_python: str) -> tuple[str | None, str]:
+        """创建/复用 venv，返回 (venv 内的 python 路径, 日志)。
+
+        SteamOS 锁了系统 pip (PEP 668)，但允许 venv —— venv 内部的 pip 不受限。
+        venv 位置：~/.cache/deckmind/venv，所有 DeckMind plugin 共用一个。
+        """
+        venv_dir = self.cache_dir / "venv"
+        venv_python = venv_dir / "bin" / "python"
+
+        if venv_python.exists():
+            return str(venv_python), "复用已有 venv"
+
+        try:
+            result = subprocess.run(
+                [system_python, "-m", "venv", str(venv_dir)],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                env=self._clean_env(),
+            )
+        except subprocess.TimeoutExpired:
+            return None, "创建 venv 超时"
+        if result.returncode != 0:
+            return None, f"创建 venv 失败:\n{result.stderr.strip()}"
+
+        if not venv_python.exists():
+            return None, f"venv 创建后未找到 python 可执行文件：{venv_python}"
+
+        return str(venv_python), "新建 venv"
+
+    def _copy_site_packages_to_vendor(
+        self,
+        venv_python_path: str,
+        vendor: Path,
+    ) -> tuple[bool, str]:
+        """把 venv 的 site-packages 内容平铺复制到 vendor 目录。
+
+        Decky plugin 用的是 Decky 内置 Python，无法直接用 venv，
+        所以必须把 venv 装好的包搬到 vendor，让 runtime 通过 sys.path 找到。
+        """
+        venv_python = Path(venv_python_path)
+        # venv 结构: <venv>/lib/python3.x/site-packages
+        lib_dir = venv_python.parent.parent / "lib"
+        if not lib_dir.exists():
+            return False, f"venv 缺 lib 目录：{lib_dir}"
+
+        site_packages = None
+        for py_dir in lib_dir.glob("python*"):
+            candidate = py_dir / "site-packages"
+            if candidate.exists():
+                site_packages = candidate
+                break
+
+        if site_packages is None:
+            return False, f"venv 内未找到 site-packages：{lib_dir}"
+
+        vendor.mkdir(parents=True, exist_ok=True)
+        # 复制 venv site-packages 的所有内容到 vendor
+        for item in site_packages.iterdir():
+            target = vendor / item.name
+            if target.exists():
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+            if item.is_dir():
+                shutil.copytree(item, target)
+            else:
+                shutil.copy2(item, target)
+        return True, f"已复制 site-packages → {vendor}"
+
+    def _install_python_deps(self) -> dict[str, Any]:
+        """把 requirements.txt 装到 runtime/.vendor 里。
+
+        降级策略：
+        1. 直接用系统 Python 的 pip（旧 SteamOS / 其它发行版可用）
+        2. 用系统 Python 建 venv，再用 venv 的 pip（SteamOS 3.7+ PEP 668 锁了系统 pip）
+        3. 都失败：返回错误，提示用户手动执行
+
+        失败不抛异常，返回 {ok: false, error: ...} 让 UI 显示。
+        """
+        req_file = self.runtime_dir / "requirements.txt"
+        if not req_file.exists():
+            return {"ok": True, "skipped": "no_requirements"}
+
+        vendor = self.runtime_dir / VENDOR_DIR_NAME
+        system_python = self._find_system_python()
+        if system_python is None:
             return {
                 "ok": False,
-                "error": f"pip install 失败:\n{result.stderr.strip() or result.stdout.strip()}",
+                "error": "未找到系统 Python（/usr/bin/python3 不可用）",
             }
+
+        # 第 1 路：试系统 pip 直接装
+        ok, msg = self._pip_install_to_vendor(system_python, vendor, req_file)
+        if ok:
+            return {"ok": True, "vendor": str(vendor), "via": "system_pip"}
+
+        # 系统 pip 被 PEP 668 拦截 / 不存在 → 走 venv 兜底
+        pep668 = "externally-managed-environment" in msg or "No module named pip" in msg
+        if not pep668:
+            # 既不是 PEP 668 也不是缺 pip，可能是网络/源问题，直接抛
+            return {"ok": False, "error": f"系统 pip 安装失败:\n{msg}"}
+
+        # 第 2 路：建 venv 装到 venv，然后复制到 vendor
+        venv_python, venv_log = self._ensure_venv_python(system_python)
+        if venv_python is None:
+            return {
+                "ok": False,
+                "error": f"系统 pip 不可用（PEP 668）；venv 兜底也失败：{venv_log}",
+            }
+
+        ok, msg = self._pip_install_to_vendor(venv_python, vendor, req_file)
+        if ok:
+            return {"ok": True, "vendor": str(vendor), "via": "venv", "venv_log": venv_log}
+
+        # 第 2.5 路：pip 装到 venv 自身，再 copy site-packages
+        # （某些环境 --target 会被 PEP 668 拦截，但装到 venv 默认位置可以）
+        try:
+            r = subprocess.run(
+                [venv_python, "-m", "pip", "install", "--upgrade", "-r", str(req_file)],
+                capture_output=True,
+                text=True,
+                timeout=PIP_TIMEOUT,
+                env=self._clean_env(),
+            )
+            if r.returncode != 0:
+                return {
+                    "ok": False,
+                    "error": f"venv pip 安装也失败:\n{r.stderr.strip() or r.stdout.strip()}",
+                }
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": f"venv pip 安装超时（{PIP_TIMEOUT}s）"}
+
+        copied, copy_msg = self._copy_site_packages_to_vendor(venv_python, vendor)
+        if not copied:
+            return {"ok": False, "error": f"venv 装好后复制失败：{copy_msg}"}
+        return {"ok": True, "vendor": str(vendor), "via": "venv+copy", "venv_log": venv_log}
         return {"ok": True, "vendor": str(vendor), "python": python}
 
     def install(self) -> dict[str, Any]:
