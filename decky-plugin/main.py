@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Decky 加载 plugin 时不会把 plugin 目录加入 sys.path，
+# 所以同目录的 config_store/installer/runtime_client 必须手动加入路径。
+_PLUGIN_DIR = Path(__file__).resolve().parent
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
+
 try:
     import decky
 except ImportError:  # pragma: no cover - Decky exists inside decky-loader.
