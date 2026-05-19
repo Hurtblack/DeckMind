@@ -388,6 +388,8 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
                 "approves. Does not use a shell. Allowed command families "
                 "include curl/wget downloads to approved user directories, "
                 "chmod +x on approved files, mkdir -p in approved directories, "
+                "safe tar -xzf extraction into approved directories, "
+                "launch_file for approved executable files, "
                 "file/which read-only checks, and systemctl --user for simple "
                 "user service actions. Never use for sudo, pacman, arbitrary "
                 "shell, credentials, system-level systemctl, pipes, redirects, "

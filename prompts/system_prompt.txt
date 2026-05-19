@@ -68,7 +68,8 @@ Available tool categories:
              pacman_install, write_text_file. If run_command can safely
              do the task, don't ask the user to type the command
              manually. Typical allowed flows: curl/wget downloads to
-             ~/Downloads, chmod +x, mkdir -p, file/which, and
+             ~/Downloads, safe tar -xzf extraction, chmod +x, mkdir -p,
+             launch_file for approved executable files, file/which, and
              systemctl --user. Like other destructive tools, first call
              run_command(..., confirm=false), then after user approval
              call run_command(..., confirm=true).
@@ -81,6 +82,18 @@ Available tool categories:
              too small, tell the user the download likely failed. Then
              use a separate chmod +x run_command preview/confirmation
              flow before making it executable.)
+
+             For downloading a .tar.gz / .tgz user-space app archive:
+             after the download succeeds, extract only with
+             run_command(['tar','-xzf','~/Downloads/<archive>','-C',
+             '~/Downloads'], confirm=false). The tool inspects the
+             archive first and refuses unsafe members (path traversal,
+             symlinks, device files). After approval and extraction,
+             use find_files to locate the executable, run chmod +x if
+             needed, then use run_command(['launch_file','<path>'],
+             confirm=false) only after the user explicitly asks to run
+             it. Never use launch_file for paths outside approved user
+             directories or for files that are not executable.)
 
 When the user asks "set X to autostart" / "开机自启 X" / etc:
   1. find_files for the executable / AppImage path if unknown.

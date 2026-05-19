@@ -252,6 +252,152 @@ class CommandToolValidationTests(unittest.TestCase):
         self.assertIn("credential-like URL parameter", result.reason or "")
 
 
+class CommandToolArchiveAndLaunchTests(unittest.TestCase):
+    def setUp(self) -> None:
+        import shutil
+
+        self.root = Path(__file__).resolve().parents[1] / ".test-command-tool"
+        shutil.rmtree(self.root, ignore_errors=True)
+        self.root.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self) -> None:
+        import shutil
+
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _write_tar(self, name: str, member_name: str) -> Path:
+        import io
+        import tarfile
+
+        archive = self.root / name
+        payload = b"#!/bin/sh\n"
+        info = tarfile.TarInfo(member_name)
+        info.size = len(payload)
+        with tarfile.open(archive, "w:gz") as tar:
+            tar.addfile(info, io.BytesIO(payload))
+        return archive
+
+    def _approved_dir_patches(self, module):
+        from unittest.mock import patch
+
+        root = str(self.root.resolve(strict=False))
+        return (
+            patch.object(module, "_APPROVED_WRITE_DIRS", (root,)),
+            patch.object(module, "_APPROVED_READ_DIRS", (root,)),
+        )
+
+    def test_tar_extract_validates_archive_members_and_paths(self) -> None:
+        from unittest.mock import patch
+
+        module = load_command_tool()
+        archive = self._write_tar("Clash.Verge_x64.app.tar.gz", "Clash Verge/clash-verge")
+        dest = self.root / "extract"
+        dest.mkdir()
+
+        write_patch, read_patch = self._approved_dir_patches(module)
+        with (
+            patch("shutil.which", return_value="/usr/bin/tar"),
+            write_patch,
+            read_patch,
+        ):
+            result = module.validate_command(["tar", "-xzf", str(archive), "-C", str(dest)])
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.command, "tar")
+        self.assertEqual(result.argv[2], str(archive.resolve(strict=False)))
+        self.assertEqual(result.argv[4], str(dest.resolve(strict=False)))
+        self.assertEqual(result.output_path, str(dest.resolve(strict=False)))
+
+    def test_tar_extract_rejects_path_traversal_member(self) -> None:
+        from unittest.mock import patch
+
+        module = load_command_tool()
+        archive = self._write_tar("bad.tar.gz", "../evil")
+        dest = self.root / "extract"
+        dest.mkdir()
+
+        write_patch, read_patch = self._approved_dir_patches(module)
+        with (
+            patch("shutil.which", return_value="/usr/bin/tar"),
+            write_patch,
+            read_patch,
+        ):
+            result = module.validate_command(["tar", "-xzf", str(archive), "-C", str(dest)])
+
+        self.assertFalse(result.ok)
+        self.assertIn("unsafe tar member path", result.reason or "")
+
+    def test_launch_file_validates_approved_executable(self) -> None:
+        module = load_command_tool()
+        executable = self.root / "clash-verge"
+        executable.write_text("#!/bin/sh\n", encoding="utf-8")
+        executable.chmod(0o755)
+
+        write_patch, read_patch = self._approved_dir_patches(module)
+        with write_patch, read_patch:
+            result = module.validate_command(["launch_file", str(executable)])
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.command, "launch_file")
+        self.assertEqual(result.argv, [str(executable.resolve(strict=False))])
+
+    def test_launch_file_rejects_non_executable(self) -> None:
+        module = load_command_tool()
+        executable = self.root / "clash-verge"
+        executable.write_text("#!/bin/sh\n", encoding="utf-8")
+        executable.chmod(0o644)
+
+        write_patch, read_patch = self._approved_dir_patches(module)
+        with write_patch, read_patch:
+            result = module.validate_command(["launch_file", str(executable)])
+
+        self.assertFalse(result.ok)
+        self.assertIn("launch target must be executable", result.reason or "")
+
+    def test_launch_validated_uses_desktop_environment_without_preload(self) -> None:
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+
+        module = load_command_tool()
+        executable = self.root / "clash-verge"
+        executable.write_text("#!/bin/sh\n", encoding="utf-8")
+        executable.chmod(0o755)
+        validation = module.ValidationResult(
+            True,
+            [str(executable.resolve(strict=False))],
+            command="launch_file",
+        )
+        captured = {}
+
+        class FakeProcess:
+            pid = 12345
+
+        async def fake_create_subprocess_exec(*argv, **kwargs):
+            captured["argv"] = argv
+            captured["cwd"] = kwargs.get("cwd")
+            captured["env"] = kwargs.get("env")
+            return FakeProcess()
+
+        async def launch_with_env_capture():
+            with (
+                patch.dict(module.os.environ, {"DISPLAY": ":1", "LD_PRELOAD": "bad"}, clear=False),
+                patch.object(
+                    module.asyncio,
+                    "create_subprocess_exec",
+                    AsyncMock(side_effect=fake_create_subprocess_exec),
+                ),
+            ):
+                return await module._launch_validated(validation)
+
+        result = asyncio.run(launch_with_env_capture())
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["pid"], 12345)
+        self.assertEqual(captured["cwd"], str(executable.parent.resolve(strict=False)))
+        self.assertEqual(captured["env"]["DISPLAY"], ":1")
+        self.assertNotIn("LD_PRELOAD", captured["env"])
+
+
 class CommandToolExecutionPathTests(unittest.IsolatedAsyncioTestCase):
     async def test_run_command_returns_dry_run_preview_without_confirmation(self) -> None:
         module = load_command_tool()

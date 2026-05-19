@@ -6,9 +6,10 @@ import asyncio
 import os
 import re
 import shutil
+import tarfile
 import time
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import parse_qsl, urlparse
 
@@ -90,6 +91,14 @@ _EXEC_ENV = {
     "LANG": os.environ.get("LANG", "C.UTF-8"),
     "LC_ALL": os.environ.get("LC_ALL", "C.UTF-8"),
 }
+_LAUNCH_ENV_KEYS: tuple[str, ...] = (
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "XDG_RUNTIME_DIR",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "XDG_CURRENT_DESKTOP",
+    "DESKTOP_SESSION",
+)
 
 
 def _reject(argv: list[str], reason: str, command: str | None = None) -> ValidationResult:
@@ -183,6 +192,15 @@ def _validate_readable_path(raw_path: str) -> tuple[Path | None, str | None]:
     return path, None
 
 
+def _validate_approved_directory(raw_path: str) -> tuple[Path | None, str | None]:
+    path, reason = _validate_approved_write_path(raw_path)
+    if reason:
+        return None, reason
+    if path is None or not path.exists() or not path.is_dir():
+        return None, "target directory must exist"
+    return path, None
+
+
 def _validated(
     argv: list[str],
     command: str,
@@ -225,6 +243,10 @@ def validate_command(argv: list[str]) -> ValidationResult:
         validation = _validate_which(argv)
     elif command == "systemctl":
         validation = _validate_systemctl(argv)
+    elif command == "tar":
+        validation = _validate_tar(argv)
+    elif command == "launch_file":
+        return _validate_launch_file(argv)
     else:
         return _reject(argv, f"unsupported command: {command}", command=command)
 
@@ -362,6 +384,76 @@ def _validate_systemctl(argv: list[str]) -> ValidationResult:
     return _validated(argv, command, read_only=(action == "status"))
 
 
+def _validate_tar(argv: list[str]) -> ValidationResult:
+    command = "tar"
+    if len(argv) != 5 or argv[1] != "-xzf" or argv[3] != "-C":
+        return _reject(argv, "only tar -xzf <archive> -C <directory> is allowed", command=command)
+
+    archive, archive_reason = _validate_readable_path(argv[2])
+    if archive_reason:
+        return _reject(argv, archive_reason, command=command)
+    if archive is None or not (archive.name.endswith(".tar.gz") or archive.name.endswith(".tgz")):
+        return _reject(argv, "tar archive must be .tar.gz or .tgz", command=command)
+
+    dest, dest_reason = _validate_approved_directory(argv[4])
+    if dest_reason:
+        return _reject(argv, dest_reason, command=command)
+
+    archive_reason = _validate_tar_archive_members(archive, dest)
+    if archive_reason:
+        return _reject(argv, archive_reason, command=command)
+
+    exec_argv = list(argv)
+    exec_argv[2] = str(archive)
+    exec_argv[4] = str(dest)
+    return _validated(exec_argv, command, output_path=str(dest))
+
+
+def _validate_tar_archive_members(archive: Path, dest: Path) -> str | None:
+    try:
+        with tarfile.open(archive, "r:gz") as tar:
+            for member in tar.getmembers():
+                name = member.name
+                if not name or _has_sensitive_fragment(name):
+                    return f"unsafe tar member path: {name}"
+                member_path = PurePosixPath(name)
+                if member_path.is_absolute() or ".." in member_path.parts:
+                    return f"unsafe tar member path: {name}"
+                if member.issym() or member.islnk() or member.isdev() or member.isfifo():
+                    return f"unsafe tar member type: {name}"
+                target = (dest / Path(*member_path.parts)).resolve(strict=False)
+                if not (_is_under(target, dest) or target == dest):
+                    return f"unsafe tar member path: {name}"
+    except (tarfile.TarError, OSError) as exc:
+        return f"could not inspect tar archive: {exc}"
+    return None
+
+
+def _validate_launch_file(argv: list[str]) -> ValidationResult:
+    command = "launch_file"
+    if len(argv) != 2:
+        return _reject(argv, "launch_file expects one executable path", command=command)
+
+    path, path_reason = _validate_approved_write_path(argv[1])
+    if path_reason:
+        return _reject(argv, path_reason, command=command)
+    if path is None or not path.exists() or not path.is_file():
+        return _reject(argv, "launch target must be an existing regular file", command=command)
+    if not os.access(path, os.X_OK):
+        return _reject(argv, "launch target must be executable", command=command)
+
+    return _validated([str(path)], command)
+
+
+def _launch_env() -> dict[str, str]:
+    env = dict(_EXEC_ENV)
+    for key in _LAUNCH_ENV_KEYS:
+        value = os.environ.get(key)
+        if value:
+            env[key] = value
+    return env
+
+
 async def run_command(argv: list[str], confirm: bool = False) -> dict[str, Any]:
     """Validate and optionally execute a command.
 
@@ -387,7 +479,49 @@ async def run_command(argv: list[str], confirm: bool = False) -> dict[str, Any]:
             "message": "Command validated. Ask the user to confirm, then call again with confirm=true.",
         }
 
+    if validation.command == "launch_file":
+        return await _launch_validated(validation)
     return await _execute_validated(validation)
+
+
+async def _launch_validated(validation: ValidationResult) -> dict[str, Any]:
+    """Launch an approved user executable and return immediately."""
+    started = time.monotonic()
+    executable = Path(validation.argv[0])
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *validation.argv,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+            cwd=str(executable.parent),
+            env=_launch_env(),
+            start_new_session=True,
+        )
+    except OSError as exc:
+        elapsed = time.monotonic() - started
+        return {
+            "ok": False,
+            "argv": validation.argv,
+            "command": validation.command,
+            "returncode": -1,
+            "elapsed_seconds": elapsed,
+            "output_size_bytes": None,
+            "read_only": validation.read_only,
+            "output_path": validation.output_path,
+            "error": f"failed to launch file: {exc}",
+        }
+
+    return {
+        "ok": True,
+        "argv": validation.argv,
+        "command": validation.command,
+        "pid": proc.pid,
+        "elapsed_seconds": time.monotonic() - started,
+        "read_only": validation.read_only,
+        "output_path": validation.output_path,
+        "message": "launched approved executable",
+    }
 
 
 async def _execute_validated(validation: ValidationResult) -> dict[str, Any]:
