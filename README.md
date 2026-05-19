@@ -15,7 +15,7 @@ Built to be small enough to read in one sitting — the whole loop is in
   user ──▶  │  Planner ──function_call──▶ Executor ──▶ tool │
             │     ▲                            │           │
             │     └──function_call_output──────┘           │
-            │            (loop until final_answer)         │
+            │       (loop until the model emits text)      │
             └─────────────────────────────────────────────┘
 ```
 
@@ -24,11 +24,14 @@ Built to be small enough to read in one sitting — the whole loop is in
 - **Executor** (`runtime/executor.py`) — looks the tool up in the
   registry and awaits it.
 - **Agent** (`runtime/agent.py`) — the runtime loop that wires them
-  together, feeds tool results back, and stops on `final_answer` or
-  after `MAX_STEPS` iterations.
+  together, feeds tool results back, and stops when the model emits
+  natural-language text or after `MAX_STEPS` iterations.
 - **Tools** (`tools/*.py`) — actual side-effecting code (Steam, system,
   macros). Add one by registering it in `tools/__init__.py`.
 - **Memory** (`memory/session.py`) — bounded chat history.
+
+For a more detailed visual architecture diagram, open
+[docs/architecture.html](docs/architecture.html) in a browser.
 
 ## Install (any Linux / macOS dev machine)
 
@@ -249,7 +252,7 @@ does not change.
 uv run python main.py
 ```
 
-## Built-in tools (27 total)
+## Built-in tools (40 total)
 
 | Group | Tools | Risk |
 |---|---|---|
@@ -257,14 +260,19 @@ uv run python main.py
 | Steam | `install_game`, `uninstall_game` | **destructive (2-step confirm)** |
 | Packages | `list_flatpak_apps`, `search_flatpak`, `disk_usage` | safe |
 | Packages | `install_flatpak`, `uninstall_flatpak` | **destructive (2-step confirm)** |
+| Pacman / SteamOS | `pacman_search`, `steamos_lock_status`, `steamos_lock` | safe |
+| Pacman / SteamOS | `steamos_unlock` | side-effect |
+| Pacman / SteamOS | `pacman_install`, `set_pacman_mirror_china` | **destructive (2-step confirm)** |
 | System | `get_battery`, `get_volume` | safe |
 | System | `set_volume` | side-effect |
 | Macro | `press_key`, `start_key_loop`, `stop_all_macros` | side-effect |
+| Files / diagnostics | `find_files`, `list_processes`, `read_text_file` | safe |
+| Files / diagnostics | `write_text_file`, `run_command` | **destructive (2-step confirm)** |
 | **Profile** | `remember`, `forget`, `list_profile` | safe |
 | **Self-update** | `check_for_updates` | safe |
 | **Self-update** | `apply_update` | **destructive (2-step confirm)** |
-| **Notion** | `notion_status`, `notion_databases`, `notion_set_default_database`, `notion_recent`, `notion_total` | safe |
-| **Notion** | `notion_log_session` | side-effect |
+| **Notion** | `notion_status`, `notion_databases`, `notion_set_default_database`, `notion_pages`, `notion_recent`, `notion_total` | safe |
+| **Notion** | `notion_log_session`, `notion_create_page` | side-effect |
 
 The agent ends a turn by emitting natural-language text — there is no
 `final_answer` sentinel tool.
@@ -277,9 +285,9 @@ system-prompt rules. Three risk classes:
 
 | Class | Behavior | Tools |
 |---|---|---|
-| `safe` | runs silently | get_*, list_*, search_*, disk_usage, check_for_updates, remember/forget/list_profile, notion_status/databases/recent/total/set_default_database |
-| `side_effect` | prompts `[y / n / a]` (a = allow this tool for the rest of the session) | set_volume, press_key, start_key_loop, stop_all_macros, launch_game, close_game, notion_log_session |
-| `destructive` | `confirm=false` is a free preview; `confirm=true` prompts `[y / n / a]` before running | install_*, uninstall_*, apply_update |
+| `safe` | runs silently | get_*, list_*, search_*, disk_usage, find_files, list_processes, read_text_file, check_for_updates, remember/forget/list_profile, pacman_search, steamos_lock_status/lock, Notion read tools |
+| `side_effect` | prompts `[y / n / a]` (a = allow this tool for the rest of the session) | set_volume, press_key, start_key_loop, stop_all_macros, launch_game, close_game, steamos_unlock, notion_log_session, notion_create_page |
+| `destructive` | `confirm=false` is a free preview; `confirm=true` prompts `[y / n / a]` before running | install_*, uninstall_*, apply_update, pacman_install, set_pacman_mirror_china, write_text_file, run_command |
 
 The gate's default is **ask, don't block** — you always have the final
 word. `a` (allow-all) carries across both side-effect and destructive
@@ -303,10 +311,54 @@ confused.
   `org.freedesktop.Sdk`, `org.kde.Platform`, `org.gnome.Platform`,
   and their `.Sdk` / `.Locale` / `.GL.*` sub-IDs. Removing one of these
   breaks every Flatpak app on the system.
+- **`run_command`** never uses a shell and refuses shell syntax such as
+  pipes, redirects, `&&`, command substitution, and `$` expansion. Its
+  advanced mode still hard-refuses `sudo`/`su`/`doas`, shells and script
+  interpreters, `pacman`, `rm`, system-level `systemctl`, `mkfs`, raw
+  device writes, shutdown, and reboot.
+- **`write_text_file`** writes only inside user-owned allowlisted
+  directories. Sensitive paths such as `.env`, `token`, `secret`,
+  `credential`, `password`, and `~/.ssh` require an explicit
+  `high_risk_confirm=true` call and do not echo the file contents in
+  dry-run previews. This protects the local preview/output path; if you
+  paste a real token into chat, it can still be seen by the configured
+  LLM provider.
 
 Everything else — including arguably scary stuff like killing a process
 named `bash`, or uninstalling a third-party emulator — just goes
 through the normal prompt and lets you decide.
+
+### Restricted command automation
+
+`run_command` exists to remove "please type this in Konsole" friction for
+small user-level workflows. It has two modes:
+
+- **Normal allowlist**: `curl`/`wget` downloads into approved user
+  directories, `tar -xzf` safe extraction, `chmod +x`, `mkdir -p`,
+  `launch_file`, `file`, `which`, and simple `systemctl --user` actions.
+- **Advanced mode**: commands outside the normal allowlist can run from
+  trusted executable directories only, still as argv and still without a
+  shell. They require a dry-run, explicit user approval, and
+  `high_risk_confirm=true`.
+
+Examples of supported automation:
+
+```text
+Download an AppImage:
+run_command(["curl", "-L", "-o", "~/Downloads/App.AppImage", url])
+
+Extract a user-space tarball:
+run_command(["tar", "-xzf", "~/Downloads/app.tar.gz", "-C", "~/Downloads"])
+
+Launch an approved executable:
+run_command(["launch_file", "~/Downloads/App.AppImage"])
+
+Advanced diagnostic:
+run_command(["pgrep", "-a", "clash"], advanced=true)
+```
+
+This is not a general-purpose root terminal. For example,
+`sudo npm i -g pnpm@9` is intentionally refused.
 
 ## Persistent user profile
 
@@ -315,8 +367,8 @@ The agent remembers facts you've told it across restarts. Stored at
 auto-injected into the system prompt at every startup, so the agent
 already "knows you" before the first message.
 
-```
-you › 记住我叫赖天宇，喜欢魂系游戏，周末才有时间玩
+```text
+you › 记住我叫 hurtblack，喜欢魂系游戏，周末才有时间玩
 deckmind › 好的，记下来啦。
 
 [exit, reopen, even reboot]
@@ -409,28 +461,52 @@ deckmind ›             ← green, bold (agent reply, streamed token-by-token)
 
 ## Example session
 
-```
+```text
 you> 查看当前电量
   ▸ tool: get_battery({})
     ↳ {'ok': True, 'device': 'BAT1', 'percent': 78, 'status': 'Discharging'}
-  ▸ tool: final_answer({'message': 'Battery: 78% (discharging).'})
 bot> Battery: 78% (discharging).
 
 you> 把音量调到 50%
   ▸ tool: set_volume({'percent': 50})
     ↳ {'ok': True, 'percent': 50, 'backend': 'wpctl'}
-  ▸ tool: final_answer({'message': 'Volume set to 50%.'})
 bot> Volume set to 50%.
 
-you> 每隔 5 秒按一次空格键
-  ▸ tool: start_key_loop({'key': 'space', 'interval_seconds': 5})
-    ↳ {'ok': True, 'loop_id': 1, 'key': 'space', 'interval_seconds': 5, ...}
-bot> Started a loop pressing 'space' every 5s. Say "stop macros" to cancel.
+you> Clash Verge 下载好了，帮我解压并启动
+  ▸ tool: find_files({'query': 'Clash.Verge', 'roots': ['~/Downloads']})
+    ↳ {'ok': True, 'matches': ['~/Downloads/Clash.Verge_x64.app.tar.gz']}
+  ▸ tool: run_command({'argv': ['tar', '-xzf', '~/Downloads/Clash.Verge_x64.app.tar.gz', '-C', '~/Downloads'], 'confirm': False})
+    ↳ {'ok': True, 'dry_run': True, 'command': 'tar', 'output_path': '/home/deck/Downloads'}
+bot> I found the archive and inspected it. Extract it to Downloads?
 
-you> 打开 CS2
-  ▸ tool: launch_game({'game_name': 'cs2'})
-    ↳ {'ok': True, 'game': 'cs2', 'app_id': '730', 'pid': 12345}
-bot> Launching CS2.
+you> 确认
+  ▸ tool: run_command({'argv': ['tar', '-xzf', '~/Downloads/Clash.Verge_x64.app.tar.gz', '-C', '~/Downloads'], 'confirm': True})
+    ↳ {'ok': True, 'command': 'tar', 'returncode': 0}
+  ▸ tool: find_files({'query': 'clash-verge', 'roots': ['~/Downloads']})
+    ↳ {'ok': True, 'matches': ['~/Downloads/Clash Verge/clash-verge']}
+  ▸ tool: run_command({'argv': ['chmod', '+x', '~/Downloads/Clash Verge/clash-verge'], 'confirm': False})
+    ↳ {'ok': True, 'dry_run': True, 'command': 'chmod'}
+bot> The executable is `~/Downloads/Clash Verge/clash-verge`. Make it executable and launch it?
+
+you> 可以
+  ▸ tool: run_command({'argv': ['chmod', '+x', '~/Downloads/Clash Verge/clash-verge'], 'confirm': True})
+    ↳ {'ok': True, 'command': 'chmod', 'returncode': 0}
+  ▸ tool: run_command({'argv': ['launch_file', '~/Downloads/Clash Verge/clash-verge'], 'confirm': False})
+    ↳ {'ok': True, 'dry_run': True, 'command': 'launch_file'}
+  ▸ tool: run_command({'argv': ['launch_file', '~/Downloads/Clash Verge/clash-verge'], 'confirm': True})
+    ↳ {'ok': True, 'command': 'launch_file', 'pid': 12345}
+bot> Clash Verge has been launched.
+
+you> 帮我看一下 Clash 进程在不在
+  ▸ tool: run_command({'argv': ['pgrep', '-a', 'clash'], 'advanced': True, 'confirm': False})
+    ↳ {'ok': True, 'dry_run': True, 'advanced': True, 'risk_level': 'high',
+       'requires_high_risk_confirm': True}
+bot> This needs high-risk approval because it is outside the normal command allowlist. Run `pgrep -a clash`?
+
+you> 确认
+  ▸ tool: run_command({'argv': ['pgrep', '-a', 'clash'], 'advanced': True, 'confirm': True, 'high_risk_confirm': True})
+    ↳ {'ok': True, 'command': 'pgrep', 'stdout_tail': '12345 clash-verge\n'}
+bot> Clash is running: PID 12345, command `clash-verge`.
 
 you> 帮我卸载 Dolphin 模拟器
   ▸ tool: list_flatpak_apps({})
@@ -439,13 +515,11 @@ you> 帮我卸载 Dolphin 模拟器
   ▸ tool: uninstall_flatpak({'app_id': 'org.DolphinEmu.dolphin-emu', 'confirm': False})
     ↳ {'ok': True, 'dry_run': True, 'app_id': 'org.DolphinEmu.dolphin-emu',
        'size': '412 MB', 'message': 'Will uninstall ... Ask the user to confirm...'}
-  ▸ tool: final_answer({'message': '找到了 Dolphin (412 MB)。确认卸载吗？'})
 bot> 找到了 Dolphin (412 MB)。确认卸载吗？
 
 you> 确认
   ▸ tool: uninstall_flatpak({'app_id': 'org.DolphinEmu.dolphin-emu', 'confirm': True})
     ↳ {'ok': True, 'uninstalled': 'org.DolphinEmu.dolphin-emu', ...}
-  ▸ tool: final_answer({'message': '已卸载 Dolphin，释放约 412 MB。'})
 bot> 已卸载 Dolphin，释放约 412 MB。
 ```
 

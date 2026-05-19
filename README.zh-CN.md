@@ -15,7 +15,7 @@
   用户 ──▶  │  Planner ──function_call──▶ Executor ──▶ tool │
             │     ▲                            │           │
             │     └──function_call_output──────┘           │
-            │            (循环直到 final_answer)            │
+            │            (循环直到模型输出文本)              │
             └─────────────────────────────────────────────┘
 ```
 
@@ -24,7 +24,7 @@
 - **Executor**（[`runtime/executor.py`](runtime/executor.py)）—— 在工具注册表里
   找到对应实现并执行。
 - **Agent**（[`runtime/agent.py`](runtime/agent.py)）—— 把上面两者串起来：
-  把工具结果喂回 LLM，直到模型调用 `final_answer` 或达到 `MAX_STEPS` 上限。
+  把工具结果喂回 LLM，直到模型输出自然语言文本或达到 `MAX_STEPS` 上限。
 - **Tools**（[`tools/*.py`](tools/)）—— 真正干活的代码（Steam、系统、宏）。
   添加新工具 = 在 [`tools/__init__.py`](tools/__init__.py) 里加一条注册。
 - **Memory**（[`memory/session.py`](memory/session.py)）—— 滚动窗口式的最近对话记录。
@@ -238,7 +238,7 @@ export MOONSHOT_API_KEY=sk-...
 uv run python main.py
 ```
 
-## 内置工具（共 27 个）
+## 内置工具（共 40 个）
 
 | 分组 | 工具 | 风险 |
 |---|---|---|
@@ -246,14 +246,19 @@ uv run python main.py
 | Steam | `install_game`、`uninstall_game` | **destructive（两步确认）** |
 | 包管理 | `list_flatpak_apps`、`search_flatpak`、`disk_usage` | safe |
 | 包管理 | `install_flatpak`、`uninstall_flatpak` | **destructive（两步确认）** |
+| Pacman / SteamOS | `pacman_search`、`steamos_lock_status`、`steamos_lock` | safe |
+| Pacman / SteamOS | `steamos_unlock` | side-effect |
+| Pacman / SteamOS | `pacman_install`、`set_pacman_mirror_china` | **destructive（两步确认）** |
 | 系统 | `get_battery`、`get_volume` | safe |
 | 系统 | `set_volume` | side-effect |
 | 宏 | `press_key`、`start_key_loop`、`stop_all_macros` | side-effect |
+| 文件 / 诊断 | `find_files`、`list_processes`、`read_text_file` | safe |
+| 文件 / 诊断 | `write_text_file`、`run_command` | **destructive（两步确认）** |
 | **画像** | `remember`、`forget`、`list_profile` | safe |
 | **自更新** | `check_for_updates` | safe |
 | **自更新** | `apply_update` | **destructive（两步确认）** |
-| **Notion** | `notion_status`、`notion_databases`、`notion_set_default_database`、`notion_recent`、`notion_total` | safe |
-| **Notion** | `notion_log_session` | side-effect |
+| **Notion** | `notion_status`、`notion_databases`、`notion_set_default_database`、`notion_pages`、`notion_recent`、`notion_total` | safe |
+| **Notion** | `notion_log_session`、`notion_create_page` | side-effect |
 
 Agent 用一段自然语言回复来结束一轮 —— 不再有 `final_answer` 这种哨兵工具。
 
@@ -264,9 +269,9 @@ Agent 用一段自然语言回复来结束一轮 —— 不再有 `final_answer`
 
 | 风险等级 | 行为 | 工具 |
 |---|---|---|
-| `safe`（安全） | 静默放行 | get_*、list_*、search_*、disk_usage、check_for_updates、remember/forget/list_profile、notion_status/databases/recent/total/set_default_database |
-| `side_effect`（副作用） | 弹 `[y=允许 / n=拒绝 / a=本工具本会话全允许]` | set_volume、press_key、start_key_loop、stop_all_macros、launch_game、close_game、notion_log_session |
-| `destructive`（破坏性） | `confirm=false` 是免费预览；`confirm=true` 执行前弹 `[y / n / a]` | install_*、uninstall_*、apply_update |
+| `safe`（安全） | 静默放行 | get_*、list_*、search_*、disk_usage、find_files、list_processes、read_text_file、check_for_updates、remember/forget/list_profile、pacman_search、steamos_lock_status/lock、Notion 只读工具 |
+| `side_effect`（副作用） | 弹 `[y=允许 / n=拒绝 / a=本工具本会话全允许]` | set_volume、press_key、start_key_loop、stop_all_macros、launch_game、close_game、steamos_unlock、notion_log_session、notion_create_page |
+| `destructive`（破坏性） | `confirm=false` 是免费预览；`confirm=true` 执行前弹 `[y / n / a]` | install_*、uninstall_*、apply_update、pacman_install、set_pacman_mirror_china、write_text_file、run_command |
 
 闸门默认**问而不拦**，最终决定权永远在你手里。`a`（全允许）在 side_effect 和
 destructive 两种提示里都生效 —— 批量操作时按一次后就不再骚扰。
@@ -284,9 +289,48 @@ destructive 两种提示里都生效 —— 批量操作时按一次后就不再
   （`org.freedesktop.Platform`、`org.freedesktop.Sdk`、`org.kde.Platform`、
   `org.gnome.Platform` 及其 `.Sdk` / `.Locale` / `.GL.*` 等子 ID）。
   删掉它们会让系统上所有 Flatpak 应用一起挂掉。
+- **`run_command`** 不使用 shell，并拒绝管道、重定向、`&&`、命令替换、
+  `$` 展开等 shell 语法。高级模式仍然硬拒绝 `sudo`/`su`/`doas`、
+  shell 和脚本解释器、`pacman`、`rm`、系统级 `systemctl`、`mkfs`、
+  裸设备写入、关机和重启。
+- **`write_text_file`** 只写入用户目录下的允许路径。`.env`、`token`、
+  `secret`、`credential`、`password`、`~/.ssh` 这类敏感路径必须单独
+  使用 `high_risk_confirm=true`，dry-run 也不会回显文件内容。这个保护的是
+  本地预览和工具输出；如果你把真实 token 直接发到聊天里，配置的 LLM 服务商
+  仍然可能看到。
 
 其他情况 —— 哪怕看上去有点吓人，比如要 `kill` 一个叫 `bash` 的进程，
 或者卸载某个第三方模拟器 —— 都只会走正常的询问流程交给你决定。
+
+### 受限命令自动化
+
+`run_command` 用来减少"请你自己去 Konsole 输入这条命令"的摩擦，覆盖小型
+用户级自动化流程。它有两种模式：
+
+- **普通白名单**：`curl`/`wget` 下载到允许的用户目录、`tar -xzf` 安全解压、
+  `chmod +x`、`mkdir -p`、`launch_file`、`file`、`which`，以及简单的
+  `systemctl --user` 操作。
+- **高级模式**：普通白名单外的命令可以从受信任的可执行目录运行，但仍然是
+  argv 形式，不经过 shell。高级模式必须先 dry-run，用户明确批准后，再用
+  `high_risk_confirm=true` 执行。
+
+支持的自动化示例：
+
+```text
+下载 AppImage：
+run_command(["curl", "-L", "-o", "~/Downloads/App.AppImage", url])
+
+解压用户态 tarball：
+run_command(["tar", "-xzf", "~/Downloads/app.tar.gz", "-C", "~/Downloads"])
+
+启动已批准的可执行文件：
+run_command(["launch_file", "~/Downloads/App.AppImage"])
+
+高级诊断：
+run_command(["pgrep", "-a", "clash"], advanced=true)
+```
+
+它不是通用 root 终端。例如 `sudo npm i -g pnpm@9` 会被明确拒绝。
 
 ## 持久化用户画像
 
@@ -294,8 +338,8 @@ Agent **跨重启**记得你告诉它的事。存在 `~/.deckmind/profile.json`�
 一个简单的 key→value JSON。每次启动时自动注入到 system prompt，所以
 第一次说话之前 agent 就"认识你"了。
 
-```
-you › 记住我叫赖天宇，喜欢魂系游戏，周末才有时间玩
+```text
+you › 记住我叫 hurtblack，喜欢魂系游戏，周末才有时间玩
 deckmind › 好的，记下来啦。
 
 [exit，重新打开 deckmind，甚至重启 Deck]
@@ -380,28 +424,52 @@ deckmind ›             ← 亮绿色粗体（agent 回复，字逐字流式输
 
 ## 示例对话
 
-```
+```text
 you> 查看当前电量
   ▸ tool: get_battery({})
     ↳ {'ok': True, 'device': 'BAT1', 'percent': 78, 'status': 'Discharging'}
-  ▸ tool: final_answer({'message': '当前电量 78%，正在放电。'})
 bot> 当前电量 78%，正在放电。
 
 you> 把音量调到 50%
   ▸ tool: set_volume({'percent': 50})
     ↳ {'ok': True, 'percent': 50, 'backend': 'wpctl'}
-  ▸ tool: final_answer({'message': '已将音量调到 50%。'})
 bot> 已将音量调到 50%。
 
-you> 每隔 5 秒按一次空格键
-  ▸ tool: start_key_loop({'key': 'space', 'interval_seconds': 5})
-    ↳ {'ok': True, 'loop_id': 1, 'key': 'space', 'interval_seconds': 5, ...}
-bot> 已启动后台宏：每 5 秒按一次空格。说"停止宏"即可取消。
+you> Clash Verge 下载好了，帮我解压并启动
+  ▸ tool: find_files({'query': 'Clash.Verge', 'roots': ['~/Downloads']})
+    ↳ {'ok': True, 'matches': ['~/Downloads/Clash.Verge_x64.app.tar.gz']}
+  ▸ tool: run_command({'argv': ['tar', '-xzf', '~/Downloads/Clash.Verge_x64.app.tar.gz', '-C', '~/Downloads'], 'confirm': False})
+    ↳ {'ok': True, 'dry_run': True, 'command': 'tar', 'output_path': '/home/deck/Downloads'}
+bot> 找到了压缩包，也完成了安全检查。确认解压到 Downloads 吗？
 
-you> 打开 CS2
-  ▸ tool: launch_game({'game_name': 'cs2'})
-    ↳ {'ok': True, 'game': 'cs2', 'app_id': '730', 'pid': 12345}
-bot> 正在启动 CS2。
+you> 确认
+  ▸ tool: run_command({'argv': ['tar', '-xzf', '~/Downloads/Clash.Verge_x64.app.tar.gz', '-C', '~/Downloads'], 'confirm': True})
+    ↳ {'ok': True, 'command': 'tar', 'returncode': 0}
+  ▸ tool: find_files({'query': 'clash-verge', 'roots': ['~/Downloads']})
+    ↳ {'ok': True, 'matches': ['~/Downloads/Clash Verge/clash-verge']}
+  ▸ tool: run_command({'argv': ['chmod', '+x', '~/Downloads/Clash Verge/clash-verge'], 'confirm': False})
+    ↳ {'ok': True, 'dry_run': True, 'command': 'chmod'}
+bot> 找到主程序 `~/Downloads/Clash Verge/clash-verge`。确认加执行权限并启动吗？
+
+you> 可以
+  ▸ tool: run_command({'argv': ['chmod', '+x', '~/Downloads/Clash Verge/clash-verge'], 'confirm': True})
+    ↳ {'ok': True, 'command': 'chmod', 'returncode': 0}
+  ▸ tool: run_command({'argv': ['launch_file', '~/Downloads/Clash Verge/clash-verge'], 'confirm': False})
+    ↳ {'ok': True, 'dry_run': True, 'command': 'launch_file'}
+  ▸ tool: run_command({'argv': ['launch_file', '~/Downloads/Clash Verge/clash-verge'], 'confirm': True})
+    ↳ {'ok': True, 'command': 'launch_file', 'pid': 12345}
+bot> Clash Verge 已启动。
+
+you> 帮我看一下 Clash 进程在不在
+  ▸ tool: run_command({'argv': ['pgrep', '-a', 'clash'], 'advanced': True, 'confirm': False})
+    ↳ {'ok': True, 'dry_run': True, 'advanced': True, 'risk_level': 'high',
+       'requires_high_risk_confirm': True}
+bot> 这条命令不在普通白名单里，需要高风险确认。是否执行 `pgrep -a clash`？
+
+you> 确认
+  ▸ tool: run_command({'argv': ['pgrep', '-a', 'clash'], 'advanced': True, 'confirm': True, 'high_risk_confirm': True})
+    ↳ {'ok': True, 'command': 'pgrep', 'stdout_tail': '12345 clash-verge\n'}
+bot> Clash 正在运行：PID 12345，命令是 `clash-verge`。
 
 you> 帮我卸载 Dolphin 模拟器
   ▸ tool: list_flatpak_apps({})
@@ -410,13 +478,11 @@ you> 帮我卸载 Dolphin 模拟器
   ▸ tool: uninstall_flatpak({'app_id': 'org.DolphinEmu.dolphin-emu', 'confirm': False})
     ↳ {'ok': True, 'dry_run': True, 'size': '412 MB',
        'message': 'Will uninstall ... Ask the user to confirm...'}
-  ▸ tool: final_answer({'message': '找到了 Dolphin (412 MB)。确认卸载吗？'})
 bot> 找到了 Dolphin (412 MB)。确认卸载吗？
 
 you> 确认
   ▸ tool: uninstall_flatpak({'app_id': 'org.DolphinEmu.dolphin-emu', 'confirm': True})
     ↳ {'ok': True, 'uninstalled': 'org.DolphinEmu.dolphin-emu', ...}
-  ▸ tool: final_answer({'message': '已卸载 Dolphin，释放约 412 MB。'})
 bot> 已卸载 Dolphin，释放约 412 MB。
 ```
 
