@@ -21,8 +21,8 @@ DEFAULT_RUNTIME_URL = (
     "https://github.com/Hurtblack/DeckMind/releases/latest/download/"
     "deckmind-runtime.tar.gz"
 )
-RUNTIME_HOME = Path.home() / ".local" / "share" / "deckmind" / "runtime"
-CACHE_HOME = Path.home() / ".cache" / "deckmind"
+RUNTIME_HOME = Path.home() / "deckmind" / "runtime"
+CACHE_HOME = Path.home() / "deckmind" / ".cache"
 MANIFEST_NAME = "deckmind-runtime.json"
 
 

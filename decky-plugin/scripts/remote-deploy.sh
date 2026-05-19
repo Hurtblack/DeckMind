@@ -15,7 +15,7 @@ PLUGIN_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 AGENT_DIR="$(cd -- "$PLUGIN_DIR/.." && pwd)"
 
 PLUGIN_REMOTE="/home/deck/homebrew/plugins/DeckMind"
-RUNTIME_REMOTE="/home/deck/.local/share/deckmind/runtime"
+RUNTIME_REMOTE="/home/deck/deckmind/runtime"
 
 echo "==> 本地构建 plugin 前端"
 cd "$PLUGIN_DIR"
