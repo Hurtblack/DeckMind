@@ -27,6 +27,7 @@ from llm import HistoryItem, make_client, resolve_provider_model
 from memory import SessionMemory
 
 from .context import format_context_for_prompt, gather_context
+from .control import parse_control_command
 from .executor import Executor
 from .interfaces import PermissionProvider, RuntimeEventSink
 from .planner import Planner
@@ -124,6 +125,16 @@ class Agent:
 
     async def handle(self, user_text: str) -> str:
         """Run one user turn end-to-end. Returns the assistant's full reply."""
+        command = parse_control_command(user_text, current_provider=self.provider)
+        if command is not None:
+            result = self.switch_llm(
+                provider=command["provider"],
+                model=command["model"],
+            )
+            reply = f"已切换到 {result['provider']} · {result['model']}"
+            print(ui.agent_prefix("deckmind ›") + " " + reply)
+            return reply
+
         # monotonic so we measure pure elapsed time even if the system
         # clock jumps (NTP sync, daylight savings, etc.).
         turn_start = time.monotonic()

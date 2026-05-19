@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import unittest
 from typing import Any
 from unittest.mock import patch
 
 from runtime.agent import Agent
+from runtime.control import parse_control_command
 from runtime.executor import Executor
 from runtime.interfaces import PermissionRequest
-from main import parse_control_command
 
 
 class RecordingPermissionProvider:
@@ -100,8 +102,8 @@ class RuntimeInterfaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(provider.requests), 1)
 
 
-class AgentInterfaceWiringTests(unittest.TestCase):
-    def test_agent_passes_runtime_interfaces_to_executor(self) -> None:
+class AgentInterfaceWiringTests(unittest.IsolatedAsyncioTestCase):
+    async def test_agent_passes_runtime_interfaces_to_executor(self) -> None:
         provider = object()
 
         async def emit(event: dict[str, Any]) -> None:
@@ -121,7 +123,7 @@ class AgentInterfaceWiringTests(unittest.TestCase):
             event_sink=emit,
         )
 
-    def test_agent_can_switch_llm_without_resetting_runtime_state(self) -> None:
+    async def test_agent_can_switch_llm_without_resetting_runtime_state(self) -> None:
         class FakeClient:
             def __init__(self, model: str) -> None:
                 self.model = model
@@ -153,11 +155,35 @@ class AgentInterfaceWiringTests(unittest.TestCase):
         self.assertEqual(agent.total_output_tokens, 34)
         self.assertEqual(created, [(None, None), ("deepseek", "deepseek-v4-pro")])
 
+    async def test_agent_intercepts_natural_language_deepseek_pro_switch(self) -> None:
+        class FakeClient:
+            def __init__(self, model: str) -> None:
+                self.model = model
+
+        created: list[tuple[str | None, str | None]] = []
+
+        def fake_make_client(*, provider: str | None = None, model: str | None = None) -> FakeClient:
+            created.append((provider, model))
+            return FakeClient(model or "deepseek-v4-flash")
+
+        with patch("runtime.agent.make_client", side_effect=fake_make_client):
+            agent = Agent(provider="deepseek", model="deepseek-v4-flash")
+            with contextlib.redirect_stdout(io.StringIO()):
+                reply = await agent.handle("换pro模型")
+
+        self.assertEqual(reply, "已切换到 deepseek · deepseek-v4-pro")
+        self.assertEqual(agent.model, "deepseek-v4-pro")
+        self.assertEqual(agent.memory.snapshot(), [])
+        self.assertEqual(created, [
+            ("deepseek", "deepseek-v4-flash"),
+            ("deepseek", "deepseek-v4-pro"),
+        ])
+
 
 class ControlCommandTests(unittest.TestCase):
     def test_model_command_switches_model_on_current_provider(self) -> None:
         self.assertEqual(
-            parse_control_command("/model deepseek-v4-pro", current_provider="deepseek"),
+            parse_control_command("/model pro", current_provider="deepseek"),
             {"provider": "deepseek", "model": "deepseek-v4-pro"},
         )
 
@@ -175,6 +201,18 @@ class ControlCommandTests(unittest.TestCase):
 
     def test_non_control_command_returns_none(self) -> None:
         self.assertIsNone(parse_control_command("帮我安装 clash", current_provider="deepseek"))
+
+    def test_natural_language_pro_command_switches_deepseek_model(self) -> None:
+        self.assertEqual(
+            parse_control_command("换pro模型", current_provider="deepseek"),
+            {"provider": "deepseek", "model": "deepseek-v4-pro"},
+        )
+
+    def test_natural_language_flash_command_switches_deepseek_model(self) -> None:
+        self.assertEqual(
+            parse_control_command("切回 flash 模型", current_provider="deepseek"),
+            {"provider": "deepseek", "model": "deepseek-v4-flash"},
+        )
 
 
 if __name__ == "__main__":

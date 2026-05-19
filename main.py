@@ -16,6 +16,7 @@ import sys
 
 from llm import PROVIDERS
 from runtime import Agent
+from runtime.control import parse_control_command
 from runtime import ui
 
 
@@ -23,33 +24,6 @@ BANNER = (
     "SteamDeckAgent — type a request, `/model <model>`, "
     "`/api <provider> [model]`, or `exit` to quit."
 )
-
-
-def parse_control_command(
-    line: str,
-    *,
-    current_provider: str,
-) -> dict[str, str | None] | None:
-    """Parse REPL-only control commands for switching LLM settings."""
-    parts = line.split()
-    if not parts:
-        return None
-
-    command = parts[0].lower()
-    if command == "/model":
-        if len(parts) != 2:
-            raise ValueError("Usage: /model <model>")
-        return {"provider": current_provider, "model": parts[1]}
-
-    if command in {"/api", "/provider"}:
-        if len(parts) not in {2, 3}:
-            raise ValueError("Usage: /api <provider> [model]")
-        return {
-            "provider": parts[1].lower(),
-            "model": parts[2] if len(parts) == 3 else None,
-        }
-
-    return None
 
 
 def _check_api_key() -> None:
