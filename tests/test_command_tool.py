@@ -252,6 +252,73 @@ class CommandToolValidationTests(unittest.TestCase):
         self.assertIn("credential-like URL parameter", result.reason or "")
 
 
+class CommandToolAdvancedValidationTests(unittest.TestCase):
+    def test_advanced_mode_allows_high_risk_diagnostic_command(self) -> None:
+        from unittest.mock import patch
+
+        module = load_command_tool()
+        with patch("shutil.which", return_value="/usr/bin/pgrep"):
+            result = module.validate_command(
+                ["pgrep", "-a", "clash"],
+                advanced=True,
+            )
+
+        self.assertTrue(result.ok)
+        self.assertTrue(result.advanced)
+        self.assertEqual(result.risk_level, "high")
+        self.assertIn("advanced command", result.risk_reason or "")
+        self.assertEqual(result.argv[0], "/usr/bin/pgrep")
+
+    def test_advanced_mode_blocks_hardline_command(self) -> None:
+        module = load_command_tool()
+
+        result = module.validate_command(["reboot"], advanced=True)
+
+        self.assertFalse(result.ok)
+        self.assertIn("hardline", result.reason or "")
+
+    def test_advanced_mode_blocks_shell_interpreter(self) -> None:
+        module = load_command_tool()
+
+        result = module.validate_command(["sh", "-c", "echo hi"], advanced=True)
+
+        self.assertFalse(result.ok)
+        self.assertIn("not allowed in advanced mode", result.reason or "")
+
+    def test_high_risk_command_requires_high_risk_confirm_to_execute(self) -> None:
+        import asyncio
+        from unittest.mock import patch
+
+        module = load_command_tool()
+
+        async def run_without_high_risk_confirm():
+            with patch("shutil.which", return_value="/usr/bin/pgrep"):
+                return await module.run_command(
+                    ["pgrep", "-a", "clash"],
+                    confirm=True,
+                    advanced=True,
+                )
+
+        result = asyncio.run(run_without_high_risk_confirm())
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["refused"])
+        self.assertTrue(result["requires_high_risk_confirm"])
+
+    def test_redacts_secret_like_output(self) -> None:
+        module = load_command_tool()
+
+        output = module._redact_sensitive_output(
+            "HTTP_PROXY=http://127.0.0.1:7890\n"
+            "API_TOKEN=abc123\n"
+            "normal line\n"
+        )
+
+        self.assertIn("HTTP_PROXY=http://127.0.0.1:7890", output)
+        self.assertIn("API_TOKEN=[REDACTED]", output)
+        self.assertIn("normal line", output)
+
+
 class CommandToolArchiveAndLaunchTests(unittest.TestCase):
     def setUp(self) -> None:
         import shutil

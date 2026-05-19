@@ -22,6 +22,9 @@ class ValidationResult:
     reason: str | None = None
     read_only: bool = False
     output_path: str | None = None
+    advanced: bool = False
+    risk_level: str = "normal"
+    risk_reason: str | None = None
 
 
 _APPROVED_WRITE_DIRS: tuple[str, ...] = (
@@ -77,6 +80,11 @@ _SHELL_META_TOKENS: tuple[str, ...] = (
 
 _SIMPLE_COMMAND_RE = re.compile(r"^[A-Za-z0-9._+-]+$")
 _SYSTEMD_UNIT_RE = re.compile(r"^[A-Za-z0-9_.@-]+\.service$")
+_SECRET_ENV_RE = re.compile(
+    r"^([A-Za-z_][A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|PASSWD|AUTH)[A-Za-z0-9_]*=).*$",
+    re.IGNORECASE,
+)
+_URL_CREDENTIAL_RE = re.compile(r"://([^/\s:@]+):([^/\s@]+)@")
 _TRUSTED_EXECUTABLE_DIRS: tuple[str, ...] = (
     "/usr/bin",
     "/bin",
@@ -99,6 +107,43 @@ _LAUNCH_ENV_KEYS: tuple[str, ...] = (
     "XDG_CURRENT_DESKTOP",
     "DESKTOP_SESSION",
 )
+_ADVANCED_DISALLOWED_COMMANDS: set[str] = {
+    "bash",
+    "sh",
+    "zsh",
+    "fish",
+    "ksh",
+    "python",
+    "python3",
+    "perl",
+    "ruby",
+    "node",
+    "sudo",
+    "su",
+    "doas",
+    "pacman",
+    "rm",
+    "dd",
+    "mount",
+    "umount",
+    "systemctl",
+    "osascript",
+}
+_HARDLINE_COMMANDS: set[str] = {
+    "reboot",
+    "shutdown",
+    "halt",
+    "poweroff",
+    "mkfs",
+    "mkfs.ext2",
+    "mkfs.ext3",
+    "mkfs.ext4",
+    "mkfs.fat",
+    "mkfs.vfat",
+    "mkfs.xfs",
+    "init",
+    "telinit",
+}
 
 
 def _reject(argv: list[str], reason: str, command: str | None = None) -> ValidationResult:
@@ -132,6 +177,37 @@ def _has_sensitive_fragment(value: str) -> bool:
 
 def _contains_shell_metacharacter(argv: list[str]) -> bool:
     return any(any(token in arg for token in _SHELL_META_TOKENS) for arg in argv)
+
+
+def _detect_hardline_command(argv: list[str]) -> str | None:
+    if not argv:
+        return None
+
+    command = argv[0].lower()
+    if command in _HARDLINE_COMMANDS:
+        return f"hardline blocked command: {command}"
+
+    if command.startswith("mkfs."):
+        return f"hardline blocked command: {command}"
+
+    if command == "kill" and "-1" in argv[1:]:
+        return "hardline blocked command: kill -1"
+
+    if command == "dd":
+        for arg in argv[1:]:
+            if arg.startswith("of=/dev/"):
+                return "hardline blocked command: dd writes to raw device"
+
+    return None
+
+
+def _redact_sensitive_output(text: str) -> str:
+    redacted_lines: list[str] = []
+    for line in text.splitlines(keepends=True):
+        line = _SECRET_ENV_RE.sub(r"\1[REDACTED]", line)
+        line = _URL_CREDENTIAL_RE.sub(r"://[REDACTED]:[REDACTED]@", line)
+        redacted_lines.append(line)
+    return "".join(redacted_lines)
 
 
 def _resolve_executable(command: str) -> tuple[str | None, str | None]:
@@ -206,6 +282,9 @@ def _validated(
     command: str,
     read_only: bool = False,
     output_path: str | None = None,
+    advanced: bool = False,
+    risk_level: str = "normal",
+    risk_reason: str | None = None,
 ) -> ValidationResult:
     return ValidationResult(
         True,
@@ -213,10 +292,13 @@ def _validated(
         command=command,
         read_only=read_only,
         output_path=output_path,
+        advanced=advanced,
+        risk_level=risk_level,
+        risk_reason=risk_reason,
     )
 
 
-def validate_command(argv: list[str]) -> ValidationResult:
+def validate_command(argv: list[str], advanced: bool = False) -> ValidationResult:
     """Validate a command against a narrow allowlist."""
     if not argv:
         return _reject(argv, "empty command")
@@ -248,8 +330,12 @@ def validate_command(argv: list[str]) -> ValidationResult:
     elif command == "launch_file":
         return _validate_launch_file(argv)
     else:
+        if advanced:
+            return _validate_advanced_command(argv)
         return _reject(argv, f"unsupported command: {command}", command=command)
 
+    if not validation.ok and advanced:
+        return _validate_advanced_command(argv)
     if not validation.ok:
         return validation
 
@@ -259,6 +345,36 @@ def validate_command(argv: list[str]) -> ValidationResult:
 
     validation.argv[0] = executable or validation.argv[0]
     return validation
+
+
+def _validate_advanced_command(argv: list[str]) -> ValidationResult:
+    command = argv[0]
+    if "/" in command:
+        return _reject(argv, "advanced command must be an executable name", command=command)
+    if not _SIMPLE_COMMAND_RE.fullmatch(command):
+        return _reject(argv, "advanced command name is not allowed", command=command)
+
+    hardline_reason = _detect_hardline_command(argv)
+    if hardline_reason:
+        return _reject(argv, hardline_reason, command=command)
+
+    if command.lower() in _ADVANCED_DISALLOWED_COMMANDS:
+        return _reject(argv, f"{command} is not allowed in advanced mode", command=command)
+
+    executable, reason = _resolve_executable(command)
+    if reason:
+        return _reject(argv, reason, command=command)
+
+    exec_argv = list(argv)
+    exec_argv[0] = executable or exec_argv[0]
+    return _validated(
+        exec_argv,
+        command,
+        read_only=False,
+        advanced=True,
+        risk_level="high",
+        risk_reason="advanced command outside the restricted allowlist",
+    )
 
 
 def _validate_curl(argv: list[str]) -> ValidationResult:
@@ -454,18 +570,37 @@ def _launch_env() -> dict[str, str]:
     return env
 
 
-async def run_command(argv: list[str], confirm: bool = False) -> dict[str, Any]:
+async def run_command(
+    argv: list[str],
+    confirm: bool = False,
+    advanced: bool = False,
+    high_risk_confirm: bool = False,
+) -> dict[str, Any]:
     """Validate and optionally execute a command.
 
     Commands return a dry-run preview unless confirm=True.
     """
-    validation = validate_command(argv)
+    validation = validate_command(argv, advanced=advanced)
     if not validation.ok:
         return {
             "ok": False,
             "refused": True,
             "reason": validation.reason,
             "argv": validation.argv,
+        }
+
+    requires_high_risk_confirm = validation.risk_level == "high"
+    if confirm and requires_high_risk_confirm and not high_risk_confirm:
+        return {
+            "ok": False,
+            "refused": True,
+            "reason": "high-risk command requires high_risk_confirm=true after explicit user approval",
+            "argv": validation.argv,
+            "command": validation.command,
+            "advanced": validation.advanced,
+            "risk_level": validation.risk_level,
+            "risk_reason": validation.risk_reason,
+            "requires_high_risk_confirm": True,
         }
 
     if not confirm:
@@ -476,6 +611,10 @@ async def run_command(argv: list[str], confirm: bool = False) -> dict[str, Any]:
             "command": validation.command,
             "read_only": validation.read_only,
             "output_path": validation.output_path,
+            "advanced": validation.advanced,
+            "risk_level": validation.risk_level,
+            "risk_reason": validation.risk_reason,
+            "requires_high_risk_confirm": requires_high_risk_confirm,
             "message": "Command validated. Ask the user to confirm, then call again with confirm=true.",
         }
 
@@ -509,6 +648,9 @@ async def _launch_validated(validation: ValidationResult) -> dict[str, Any]:
             "output_size_bytes": None,
             "read_only": validation.read_only,
             "output_path": validation.output_path,
+            "advanced": validation.advanced,
+            "risk_level": validation.risk_level,
+            "risk_reason": validation.risk_reason,
             "error": f"failed to launch file: {exc}",
         }
 
@@ -520,6 +662,9 @@ async def _launch_validated(validation: ValidationResult) -> dict[str, Any]:
         "elapsed_seconds": time.monotonic() - started,
         "read_only": validation.read_only,
         "output_path": validation.output_path,
+        "advanced": validation.advanced,
+        "risk_level": validation.risk_level,
+        "risk_reason": validation.risk_reason,
         "message": "launched approved executable",
     }
 
@@ -547,6 +692,9 @@ async def _execute_validated(validation: ValidationResult) -> dict[str, Any]:
             "output_size_bytes": None,
             "read_only": validation.read_only,
             "output_path": validation.output_path,
+            "advanced": validation.advanced,
+            "risk_level": validation.risk_level,
+            "risk_reason": validation.risk_reason,
             "error": f"failed to start command: {exc}",
         }
 
@@ -574,12 +722,15 @@ async def _execute_validated(validation: ValidationResult) -> dict[str, Any]:
                 "argv": validation.argv,
                 "command": validation.command,
                 "returncode": proc.returncode if proc.returncode is not None else -1,
-                "stdout_tail": stdout.decode(errors="replace")[-4000:],
-                "stderr_tail": stderr.decode(errors="replace")[-4000:],
+                "stdout_tail": _redact_sensitive_output(stdout.decode(errors="replace"))[-4000:],
+                "stderr_tail": _redact_sensitive_output(stderr.decode(errors="replace"))[-4000:],
                 "elapsed_seconds": elapsed,
                 "output_size_bytes": None,
                 "read_only": validation.read_only,
                 "output_path": validation.output_path,
+                "advanced": validation.advanced,
+                "risk_level": validation.risk_level,
+                "risk_reason": validation.risk_reason,
                 "error": (
                     f"command timed out after {_COMMAND_TIMEOUT_SECONDS} "
                     f"seconds; failed to drain output: {exc}"
@@ -591,18 +742,21 @@ async def _execute_validated(validation: ValidationResult) -> dict[str, Any]:
             "argv": validation.argv,
             "command": validation.command,
             "returncode": proc.returncode if proc.returncode is not None else -1,
-            "stdout_tail": stdout.decode(errors="replace")[-4000:],
-            "stderr_tail": stderr.decode(errors="replace")[-4000:],
+            "stdout_tail": _redact_sensitive_output(stdout.decode(errors="replace"))[-4000:],
+            "stderr_tail": _redact_sensitive_output(stderr.decode(errors="replace"))[-4000:],
             "elapsed_seconds": elapsed,
             "output_size_bytes": None,
             "read_only": validation.read_only,
             "output_path": validation.output_path,
+            "advanced": validation.advanced,
+            "risk_level": validation.risk_level,
+            "risk_reason": validation.risk_reason,
             "error": f"command timed out after {_COMMAND_TIMEOUT_SECONDS} seconds",
         }
     elapsed = time.monotonic() - started
 
-    stdout_text = stdout.decode(errors="replace")
-    stderr_text = stderr.decode(errors="replace")
+    stdout_text = _redact_sensitive_output(stdout.decode(errors="replace"))
+    stderr_text = _redact_sensitive_output(stderr.decode(errors="replace"))
     output_size = None
     if validation.output_path:
         path = Path(validation.output_path)
@@ -620,4 +774,7 @@ async def _execute_validated(validation: ValidationResult) -> dict[str, Any]:
         "output_size_bytes": output_size,
         "read_only": validation.read_only,
         "output_path": validation.output_path,
+        "advanced": validation.advanced,
+        "risk_level": validation.risk_level,
+        "risk_reason": validation.risk_reason,
     }

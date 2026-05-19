@@ -361,8 +361,12 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
                 "  ~/.local/share/applications/ — custom .desktop entries\n"
                 "  ~/.deckmind/           — our own config dir\n"
                 "  ~/Documents/ ~/Desktop/ ~/Downloads/\n"
-                "Refuses ~/.ssh / ~/.gnupg / credential-like paths even "
-                "inside those bases. Refuses symlinks. Max content 100 KB.\n"
+                "High-risk writes additionally allow ~/.config/, "
+                "~/.local/share/, and ~/.ssh/.\n"
+                "Sensitive paths such as ~/.ssh, .env, token, secret, "
+                "credential, and password paths require high_risk_confirm=true "
+                "after explicit one-time user approval; their dry-run previews "
+                "redact content. Refuses symlinks. Max content 100 KB.\n"
                 "Typical use: create an autostart .desktop for an AppImage."
             ),
             parameters={
@@ -372,6 +376,14 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
                              "description": "Destination path, ~ expansion supported"},
                     "content": {"type": "string"},
                     "confirm": {"type": "boolean", "default": False},
+                    "high_risk_confirm": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "Set true only after the user explicitly approves "
+                            "a high-risk sensitive-path write."
+                        ),
+                    },
                 },
                 "required": ["path", "content"],
             },
@@ -385,15 +397,19 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
                 "Run a restricted allowlisted user-level command. "
                 "DESTRUCTIVE — call first with confirm=false for a dry-run "
                 "preview, then with confirm=true after the user explicitly "
-                "approves. Does not use a shell. Allowed command families "
-                "include curl/wget downloads to approved user directories, "
-                "chmod +x on approved files, mkdir -p in approved directories, "
-                "safe tar -xzf extraction into approved directories, "
-                "launch_file for approved executable files, "
+                "approves. Does not use a shell. Normal allowed command "
+                "families include curl/wget downloads to approved user "
+                "directories, chmod +x on approved files, mkdir -p in "
+                "approved directories, safe tar -xzf extraction into approved "
+                "directories, launch_file for approved executable files, "
                 "file/which read-only checks, and systemctl --user for simple "
-                "user service actions. Never use for sudo, pacman, arbitrary "
-                "shell, credentials, system-level systemctl, pipes, redirects, "
-                "or compound commands."
+                "user service actions. If advanced=true, commands outside "
+                "the normal allowlist may run from trusted executable dirs "
+                "only, still without shell metacharacters, but require "
+                "high_risk_confirm=true after explicit one-time user approval. "
+                "Hardline commands such as reboot/shutdown, mkfs, dd to raw "
+                "devices, shells/interpreters, sudo/su/doas, pacman, rm, and "
+                "system-level systemctl are refused."
             ),
             parameters={
                 "type": "object",
@@ -404,6 +420,22 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
                         "description": "Command argv, e.g. ['which', 'sh']",
                     },
                     "confirm": {"type": "boolean", "default": False},
+                    "advanced": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "Enable the high-risk advanced command path for "
+                            "commands outside the normal allowlist."
+                        ),
+                    },
+                    "high_risk_confirm": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "Set true only after the user explicitly approves "
+                            "a high-risk advanced command."
+                        ),
+                    },
                 },
                 "required": ["argv"],
             },

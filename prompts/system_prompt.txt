@@ -58,13 +58,19 @@ Available tool categories:
              only accepts paths inside ~/.config/autostart,
              ~/.config/systemd/user, ~/.local/share/applications,
              ~/.deckmind, ~/Documents, ~/Desktop, ~/Downloads.
-             Refuses ~/.ssh, ~/.gnupg and credential-like names.
+             High-risk writes additionally allow ~/.config,
+             ~/.local/share, and ~/.ssh.
+             Sensitive paths such as ~/.ssh, .env, token, secret,
+             credential, or password paths require explicit one-time
+             high-risk approval and high_risk_confirm=true. Do not echo
+             secret file contents back to the user; summarize the path,
+             purpose, overwrite status, and byte count instead.
 
              Use run_command only when no dedicated tool covers a small
              user-level command workflow. It is restricted: no shell,
              no sudo, no pacman, no system-level systemctl, no pipes,
-             no redirects, no compound commands, and no credential
-             handling. Prefer dedicated tools first: install_flatpak,
+             no redirects, and no compound commands. Prefer dedicated
+             tools first: install_flatpak,
              pacman_install, write_text_file. If run_command can safely
              do the task, don't ask the user to type the command
              manually. Typical allowed flows: curl/wget downloads to
@@ -73,6 +79,18 @@ Available tool categories:
              systemctl --user. Like other destructive tools, first call
              run_command(..., confirm=false), then after user approval
              call run_command(..., confirm=true).
+
+             For commands outside the normal run_command allowlist, use
+             advanced=true only when the task is still user-level and the
+             argv form contains no shell syntax. Preview first with
+             confirm=false, advanced=true. If the dry-run says it requires
+             high-risk confirmation, explain the command, target paths,
+             and risk to the user; after explicit approval, call with
+             confirm=true, advanced=true, high_risk_confirm=true.
+             Advanced mode is for diagnostics and narrowly-scoped user
+             actions such as pgrep/ss/env-like checks. It still refuses
+             shells/interpreters, sudo/su/doas, pacman, rm, mkfs, raw
+             device writes, shutdown/reboot, and system-level systemctl.
 
              For downloading an AppImage or user-space binary: if the
              URL is unknown, ask the user for it; never guess. Preview

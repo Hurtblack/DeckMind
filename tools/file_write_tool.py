@@ -6,9 +6,9 @@ accidentally clobber sensitive files. Walls:
 
   1. Only paths inside _WRITE_BASES (resolved to absolute paths so
      "../" can't escape).
-  2. Refuses any path whose absolute form contains a known-sensitive
-     fragment (~/.ssh, *secret*, *credential*, etc.) — defense in
-     depth in case a future base is added that overlaps.
+  2. Sensitive paths (~/.ssh, *secret*, *credential*, *token*, etc.)
+     require an explicit high-risk confirmation and never echo content
+     previews.
   3. Refuses symlinks — those could be a permitted-looking path that
      redirects elsewhere on disk.
   4. Hard cap on content size (100 KB) so an LLM hallucination can't
@@ -40,6 +40,12 @@ _WRITE_BASES: tuple[str, ...] = (
     "~/Downloads",
 )
 
+_HIGH_RISK_WRITE_BASES: tuple[str, ...] = _WRITE_BASES + (
+    "~/.config",
+    "~/.local/share",
+    "~/.ssh",
+)
+
 # Where the agent is allowed to READ. Strict superset of the write list.
 _READ_BASES: tuple[str, ...] = _WRITE_BASES + (
     "~/.config",                 # most app configs
@@ -60,11 +66,23 @@ _READ_BASES: tuple[str, ...] = _WRITE_BASES + (
 _PATH_DENYLIST: tuple[str, ...] = (
     "/.ssh", "/.gnupg", "/.aws", "/.docker", "/.kube",
     "/.password", "/.credentials", "id_rsa", "id_ed25519",
-    "/secrets", "/private",
+    "/secrets", "/private", ".env", "credential", "secret", "token",
+    "password",
 )
 
 _MAX_WRITE_BYTES = 100 * 1024     # 100 KB
 _MAX_READ_BYTES_CAP = 64 * 1024   # 64 KB read at most
+
+
+def _sensitive_path_reason(path: Path) -> str | None:
+    lower = str(path).lower()
+    for bad in _PATH_DENYLIST:
+        if bad in lower:
+            return (
+                f"path contains sensitive fragment '{bad}' and requires "
+                "explicit high-risk confirmation"
+            )
+    return None
 
 
 def _expand(p: str) -> Path:
@@ -89,15 +107,13 @@ def _validate(path: str, *, for_write: bool) -> tuple[Path | None, str | None]:
 
     resolved = _expand(path)
 
-    # Sensitive-fragment denylist (case-insensitive substring).
-    lower = str(resolved).lower()
-    for bad in _PATH_DENYLIST:
-        if bad in lower:
-            return None, (
-                f"path contains denylisted fragment '{bad}' — refusing to "
-                f"touch credential / secret files even inside otherwise-"
-                f"allowed directories"
-            )
+    # Sensitive-fragment denylist stays strict for reads. Writes handle this
+    # separately so they can require high-risk confirmation instead of a
+    # blanket refusal.
+    if not for_write:
+        reason = _sensitive_path_reason(resolved)
+        if reason:
+            return None, f"{reason}; refusing to read sensitive files"
 
     bases = _WRITE_BASES if for_write else _READ_BASES
     allowed = [_expand(b) for b in bases]
@@ -111,21 +127,48 @@ def _validate(path: str, *, for_write: bool) -> tuple[Path | None, str | None]:
     return resolved, None
 
 
+def _validate_write_path(path: str) -> tuple[Path | None, str | None, str | None]:
+    if not path or not path.strip():
+        return None, "empty path", None
+
+    resolved = _expand(path)
+    high_risk_reason = _sensitive_path_reason(resolved)
+    normal_bases = [_expand(b) for b in _WRITE_BASES]
+    if any(resolved == b or _is_within(resolved, b) for b in normal_bases):
+        return resolved, None, high_risk_reason
+
+    high_risk_bases = [_expand(b) for b in _HIGH_RISK_WRITE_BASES]
+    if any(resolved == b or _is_within(resolved, b) for b in high_risk_bases):
+        return (
+            resolved,
+            None,
+            high_risk_reason or "path is outside normal write bases and requires high-risk confirmation",
+        )
+
+    return None, (
+        "path is outside allowed directories for writing. Allowed normal writes:\n  "
+        + "\n  ".join(_WRITE_BASES)
+        + "\nHigh-risk writes additionally allow:\n  "
+        + "\n  ".join(_HIGH_RISK_WRITE_BASES)
+    ), None
+
+
 # ---------- public tools ----------
 
 async def write_text_file(
     path: str,
     content: str,
     confirm: bool = False,
+    high_risk_confirm: bool = False,
 ) -> dict[str, Any]:
     """Write text content to a file inside a whitelisted directory.
 
     confirm=False (default) returns a dry-run preview without touching
     disk. confirm=True writes (parent dirs created if missing). Refuses
-    paths outside the whitelist, paths containing sensitive fragments,
-    symlinks, and content over 100 KB.
+    paths outside the whitelist, symlinks, and content over 100 KB.
+    Sensitive paths require high_risk_confirm=True in addition to confirm=True.
     """
-    resolved, err = _validate(path, for_write=True)
+    resolved, err, high_risk_reason = _validate_write_path(path)
     if err:
         return {"ok": False, "refused": True, "reason": err}
 
@@ -148,10 +191,24 @@ async def write_text_file(
         resolved.stat().st_size if existed and resolved.is_file() else None
     )
 
+    requires_high_risk_confirm = bool(high_risk_reason)
+    if confirm and requires_high_risk_confirm and not high_risk_confirm:
+        return {
+            "ok": False,
+            "refused": True,
+            "path": str(resolved),
+            "risk_level": "high",
+            "risk_reason": high_risk_reason,
+            "requires_high_risk_confirm": True,
+            "reason": "sensitive file write requires high_risk_confirm=true after explicit user approval",
+        }
+
     if not confirm:
         # Truncate the preview so the LLM context stays small even if
         # the body is large.
-        preview = body if len(body) <= 600 else (body[:600] + "\n…[truncated]")
+        preview = None if requires_high_risk_confirm else (
+            body if len(body) <= 600 else (body[:600] + "\n…[truncated]")
+        )
         return {
             "ok": True, "dry_run": True,
             "path": str(resolved),
@@ -159,6 +216,10 @@ async def write_text_file(
             "existing_size_bytes": existing_size,
             "new_size_bytes": len(body_bytes),
             "preview": preview,
+            "preview_redacted": requires_high_risk_confirm,
+            "risk_level": "high" if requires_high_risk_confirm else "normal",
+            "risk_reason": high_risk_reason,
+            "requires_high_risk_confirm": requires_high_risk_confirm,
             "message": ("Show this preview to the user and ask them to "
                         "confirm, then call again with confirm=true."),
         }
@@ -171,6 +232,8 @@ async def write_text_file(
         "path": str(resolved),
         "bytes": len(body_bytes),
         "overwrote": existed,
+        "risk_level": "high" if requires_high_risk_confirm else "normal",
+        "risk_reason": high_risk_reason,
     }
 
 
