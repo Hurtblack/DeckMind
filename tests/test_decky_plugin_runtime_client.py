@@ -26,10 +26,23 @@ def load_plugin_module(filename: str):
 
 class FakeAgent:
     model = "fake-model"
+    provider = "deepseek"
 
     def __init__(self, events: list[dict[str, Any]]) -> None:
         self.events = events
         self.messages: list[str] = []
+        self.switches: list[tuple[str | None, str | None]] = []
+
+    def switch_llm(
+        self,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> dict[str, str]:
+        self.provider = provider or self.provider
+        self.model = model or "default-model"
+        self.switches.append((provider, model))
+        return {"provider": self.provider, "model": self.model}
 
     async def handle(self, message: str) -> str:
         self.messages.append(message)
@@ -114,7 +127,7 @@ class DeckyPluginRuntimeSessionTests(unittest.IsolatedAsyncioTestCase):
                 store = config_module.ConfigStore(path=Path(root) / "config.json")
                 store.save({
                     "provider": "deepseek",
-                    "model": "deepseek-v4-flash",
+                    "model": "fake-model",
                     "api_key": "sk-test",
                 })
                 runtime_dir = Path(root) / "runtime"
@@ -150,6 +163,66 @@ class DeckyPluginRuntimeSessionTests(unittest.IsolatedAsyncioTestCase):
                 os.environ.pop("LLM_PROVIDER", None)
             else:
                 os.environ["LLM_PROVIDER"] = previous_provider
+            if previous_key is None:
+                os.environ.pop("DEEPSEEK_API_KEY", None)
+            else:
+                os.environ["DEEPSEEK_API_KEY"] = previous_key
+
+    async def test_cached_agent_switches_llm_when_config_changes(self) -> None:
+        config_module = load_plugin_module("config_store.py")
+        client_module = load_plugin_module("runtime_client.py")
+
+        previous_provider = os.environ.get("LLM_PROVIDER")
+        previous_model = os.environ.get("LLM_MODEL")
+        previous_key = os.environ.get("DEEPSEEK_API_KEY")
+        try:
+            with tempfile.TemporaryDirectory() as root:
+                store = config_module.ConfigStore(path=Path(root) / "config.json")
+                store.save({
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-flash",
+                    "api_key": "sk-test",
+                })
+                runtime_dir = Path(root) / "runtime"
+                runtime_dir.mkdir()
+                (runtime_dir / "main.py").write_text("", encoding="utf-8")
+                created: list[FakeAgent] = []
+
+                async def make_agent(**kwargs: Any) -> FakeAgent:
+                    agent = FakeAgent(kwargs["events"])
+                    agent.model = "deepseek-v4-flash"
+                    created.append(agent)
+                    return agent
+
+                session = client_module.RuntimeSession(
+                    runtime_dir=runtime_dir,
+                    config_store=store,
+                    agent_factory=make_agent,
+                )
+
+                first = await session.ask("第一轮")
+                store.save({
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-pro",
+                    "api_key": "sk-test",
+                })
+                second = await session.ask("第二轮")
+
+            self.assertTrue(first["ok"])
+            self.assertTrue(second["ok"])
+            self.assertEqual(len(created), 1)
+            self.assertEqual(created[0].messages, ["第一轮", "第二轮"])
+            self.assertEqual(created[0].switches, [("deepseek", "deepseek-v4-pro")])
+            self.assertEqual(second["model"], "deepseek-v4-pro")
+        finally:
+            if previous_provider is None:
+                os.environ.pop("LLM_PROVIDER", None)
+            else:
+                os.environ["LLM_PROVIDER"] = previous_provider
+            if previous_model is None:
+                os.environ.pop("LLM_MODEL", None)
+            else:
+                os.environ["LLM_MODEL"] = previous_model
             if previous_key is None:
                 os.environ.pop("DEEPSEEK_API_KEY", None)
             else:

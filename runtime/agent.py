@@ -23,7 +23,7 @@ import json
 import sys
 import time
 
-from llm import HistoryItem, make_client
+from llm import HistoryItem, make_client, resolve_provider_model
 from memory import SessionMemory
 
 from .context import format_context_for_prompt, gather_context
@@ -44,11 +44,15 @@ class Agent:
         *,
         verbose: bool = False,
         context_block: str = "",
+        provider: str | None = None,
+        model: str | None = None,
         permission_provider: PermissionProvider | None = None,
         event_sink: RuntimeEventSink | None = None,
     ) -> None:
         self.verbose = verbose
-        client = make_client()
+        self.context_block = context_block
+        self.provider, _, _ = resolve_provider_model(provider=provider, model=model)
+        client = make_client(provider=provider, model=model)
         self.model = client.model
         self.planner = Planner(client, context_block=context_block)
         self.executor = Executor(
@@ -77,6 +81,24 @@ class Agent:
             permission_provider=permission_provider,
             event_sink=event_sink,
         )
+
+    def switch_llm(
+        self,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> dict[str, str]:
+        """Switch LLM provider/model while keeping runtime session state."""
+        next_provider = provider or self.provider
+        resolved_provider, _, _ = resolve_provider_model(
+            provider=next_provider,
+            model=model,
+        )
+        client = make_client(provider=resolved_provider, model=model)
+        self.provider = resolved_provider
+        self.model = client.model
+        self.planner = Planner(client, context_block=self.context_block)
+        return {"provider": self.provider, "model": self.model}
 
     # ----- per-turn display helpers -----
 

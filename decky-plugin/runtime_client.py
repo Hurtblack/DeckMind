@@ -121,7 +121,38 @@ class RuntimeSession:
         model = str(config.get("model") or "").strip()
         if model:
             os.environ["LLM_MODEL"] = model
+        else:
+            os.environ.pop("LLM_MODEL", None)
         return None
+
+    def _llm_selection(self, config: dict[str, Any]) -> tuple[str, str | None]:
+        provider = str(config.get("provider") or "openai").lower()
+        model = str(config.get("model") or "").strip() or None
+        return provider, model
+
+    def _agent_needs_llm_switch(
+        self,
+        agent: Any,
+        provider: str,
+        model: str | None,
+    ) -> bool:
+        current_provider = getattr(agent, "provider", provider)
+        current_model = getattr(agent, "model", None)
+        if current_provider != provider:
+            return True
+        return model is not None and current_model != model
+
+    def _sync_agent_llm(
+        self,
+        agent: Any,
+        provider: str,
+        model: str | None,
+    ) -> None:
+        switch_llm = getattr(agent, "switch_llm", None)
+        if not callable(switch_llm):
+            return
+        if self._agent_needs_llm_switch(agent, provider, model):
+            switch_llm(provider=provider, model=model)
 
     async def _create_agent(
         self,
@@ -167,10 +198,12 @@ class RuntimeSession:
         error = await self._preflight()
         if error is not None:
             return error
+        provider, model = self._llm_selection(self.config_store.get_runtime_config())
 
         events: list[dict[str, Any]] = []
         if self._agent is None:
             self._agent = await self._create_agent(events, DenyPermissionProvider())
+        self._sync_agent_llm(self._agent, provider, model)
 
         with contextlib.redirect_stdout(io.StringIO()):
             reply = await self._agent.handle(text)

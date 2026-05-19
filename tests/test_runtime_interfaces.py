@@ -7,6 +7,7 @@ from unittest.mock import patch
 from runtime.agent import Agent
 from runtime.executor import Executor
 from runtime.interfaces import PermissionRequest
+from main import parse_control_command
 
 
 class RecordingPermissionProvider:
@@ -119,6 +120,61 @@ class AgentInterfaceWiringTests(unittest.TestCase):
             permission_provider=provider,
             event_sink=emit,
         )
+
+    def test_agent_can_switch_llm_without_resetting_runtime_state(self) -> None:
+        class FakeClient:
+            def __init__(self, model: str) -> None:
+                self.model = model
+
+        created: list[tuple[str | None, str | None]] = []
+
+        def fake_make_client(*, provider: str | None = None, model: str | None = None) -> FakeClient:
+            created.append((provider, model))
+            return FakeClient(model or "initial-model")
+
+        with patch("runtime.agent.make_client", side_effect=fake_make_client):
+            agent = Agent()
+
+        original_memory = agent.memory
+        original_executor = agent.executor
+        agent.total_input_tokens = 12
+        agent.total_output_tokens = 34
+
+        with patch("runtime.agent.make_client", side_effect=fake_make_client):
+            result = agent.switch_llm(provider="deepseek", model="deepseek-v4-pro")
+
+        self.assertEqual(result, {"provider": "deepseek", "model": "deepseek-v4-pro"})
+        self.assertEqual(agent.provider, "deepseek")
+        self.assertEqual(agent.model, "deepseek-v4-pro")
+        self.assertEqual(agent.planner.llm.model, "deepseek-v4-pro")
+        self.assertIs(agent.memory, original_memory)
+        self.assertIs(agent.executor, original_executor)
+        self.assertEqual(agent.total_input_tokens, 12)
+        self.assertEqual(agent.total_output_tokens, 34)
+        self.assertEqual(created, [(None, None), ("deepseek", "deepseek-v4-pro")])
+
+
+class ControlCommandTests(unittest.TestCase):
+    def test_model_command_switches_model_on_current_provider(self) -> None:
+        self.assertEqual(
+            parse_control_command("/model deepseek-v4-pro", current_provider="deepseek"),
+            {"provider": "deepseek", "model": "deepseek-v4-pro"},
+        )
+
+    def test_api_command_switches_provider_and_model(self) -> None:
+        self.assertEqual(
+            parse_control_command("/api deepseek deepseek-v4-pro", current_provider="openai"),
+            {"provider": "deepseek", "model": "deepseek-v4-pro"},
+        )
+
+    def test_api_command_can_switch_provider_only(self) -> None:
+        self.assertEqual(
+            parse_control_command("/api deepseek", current_provider="openai"),
+            {"provider": "deepseek", "model": None},
+        )
+
+    def test_non_control_command_returns_none(self) -> None:
+        self.assertIsNone(parse_control_command("帮我安装 clash", current_provider="deepseek"))
 
 
 if __name__ == "__main__":

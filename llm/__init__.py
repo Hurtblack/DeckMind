@@ -62,23 +62,38 @@ PROVIDERS: dict[str, dict] = {
 }
 
 
-def make_client() -> LLMClient:
-    """Construct the LLM client selected by environment variables."""
-    name = os.environ.get("LLM_PROVIDER", "openai").lower()
+def resolve_provider_model(
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+) -> tuple[str, dict, str]:
+    """Resolve provider config and model from explicit args or env vars."""
+    name = (provider or os.environ.get("LLM_PROVIDER", "openai")).lower()
     if name not in PROVIDERS:
         raise ValueError(
-            f"Unknown LLM_PROVIDER={name!r}. Valid: {list(PROVIDERS)}"
+            f"Unknown LLM provider={name!r}. Valid: {list(PROVIDERS)}"
         )
     cfg = PROVIDERS[name]
+    selected_model = model or os.environ.get("LLM_MODEL", cfg["default_model"])
+    return name, cfg, selected_model
 
-    # Model can always be overridden by the generic LLM_MODEL env var.
-    model = os.environ.get("LLM_MODEL", cfg["default_model"])
+
+def make_client(
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+) -> LLMClient:
+    """Construct the selected LLM client."""
+    name, cfg, selected_model = resolve_provider_model(
+        provider=provider,
+        model=model,
+    )
 
     if cfg["client"] == "responses":
         from .openai_client import OpenAIResponsesClient
 
         # OpenAI's own SDK auto-reads OPENAI_API_KEY; no extra wiring.
-        return OpenAIResponsesClient(model=model)
+        return OpenAIResponsesClient(model=selected_model)
 
     # Chat-completions providers need an explicit api_key + base_url.
     api_key = os.environ.get(cfg["api_key_env"])
@@ -91,12 +106,12 @@ def make_client() -> LLMClient:
     return ChatCompletionsClient(
         api_key=api_key,
         base_url=cfg["base_url"],
-        model=model,
+        model=selected_model,
     )
 
 
 __all__ = [
     "HistoryItem", "LLMClient", "PlanResult", "PlannedCall",
     "TextDeltaCallback", "ToolSpec",
-    "make_client", "PROVIDERS",
+    "make_client", "resolve_provider_model", "PROVIDERS",
 ]
