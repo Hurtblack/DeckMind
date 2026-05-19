@@ -34,7 +34,7 @@ from .planner import Planner
 from . import ui
 
 
-MAX_STEPS = 8  # Hard cap to prevent runaway tool-calling.
+MAX_STEPS = 30  # Hard cap to prevent runaway tool-calling.
 
 
 class Agent:
@@ -82,6 +82,14 @@ class Agent:
             permission_provider=permission_provider,
             event_sink=event_sink,
         )
+
+    def set_permission_provider(self, provider: PermissionProvider) -> None:
+        """允许在 agent 复用时替换权限提供者（不同 turn 用不同的 UI 通道）。"""
+        self.executor._permission_provider = provider
+
+    def set_event_sink(self, sink: RuntimeEventSink) -> None:
+        """允许在 agent 复用时替换事件汇（每个 turn 收集自己的事件列表）。"""
+        self.executor._event_sink = sink
 
     def switch_llm(
         self,

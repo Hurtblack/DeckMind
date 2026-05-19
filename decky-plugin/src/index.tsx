@@ -5,7 +5,7 @@ import {
   staticClasses,
 } from "@decky/ui";
 import { callable, definePlugin, toaster } from "@decky/api";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FaBrain,
   FaCheckCircle,
@@ -331,12 +331,32 @@ function ConfigCard({
     }
   }, [model, modelOptions, provider]);
 
-  const updateProvider = (nextProvider: string) => {
-    setProvider(nextProvider);
-    setModel(defaultModelForProvider(nextProvider));
+  // 切下拉框立刻持久化，避免"改了 UI 但发消息时还是旧配置"
+  const persistSelection = async (nextProvider: string, nextModel: string) => {
+    const saved = await saveConfig({
+      provider: nextProvider,
+      model: nextModel,
+      api_key: "",
+    });
+    onSaved(saved);
   };
 
-  const persist = async () => {
+  const updateProvider = (nextProvider: string) => {
+    const nextModel = defaultModelForProvider(nextProvider);
+    setProvider(nextProvider);
+    setModel(nextModel);
+    void persistSelection(nextProvider, nextModel);
+  };
+
+  const updateModel = (nextModel: string) => {
+    setModel(nextModel);
+    void persistSelection(provider, nextModel);
+  };
+
+  const persistApiKey = async () => {
+    if (!apiKey.trim()) {
+      return;
+    }
     const saved = await saveConfig({ provider, model, api_key: apiKey });
     setApiKey("");
     onSaved(saved);
@@ -379,7 +399,7 @@ function ConfigCard({
           </select>
           <select
             disabled={busy}
-            onChange={(event) => setModel(event.currentTarget.value)}
+            onChange={(event) => updateModel(event.currentTarget.value)}
             style={{
               background: "rgba(0, 0, 0, 0.22)",
               border: `1px solid ${colors.border}`,
@@ -415,8 +435,12 @@ function ConfigCard({
             type="password"
             value={apiKey}
           />
-          <ButtonItem disabled={busy} layout="below" onClick={() => void persist()}>
-            保存配置
+          <ButtonItem
+            disabled={busy || !apiKey.trim()}
+            layout="below"
+            onClick={() => void persistApiKey()}
+          >
+            保存 API Key
           </ButtonItem>
         </div>
       </PanelSectionRow>
@@ -431,13 +455,19 @@ function Content() {
   const [draft, setDraft] = useState("");
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
-  const [seenEventCount, setSeenEventCount] = useState(0);
+  const seenEventCountRef = useRef(0);
   const [pollVersion, setPollVersion] = useState(0);
   const [messages, setMessages] = useState<Message[]>([]);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const appendMessage = (role: Message["role"], text: string) => {
     setMessages((current) => [...current, { id: nextId(), role, text }]);
   };
+
+  // 新消息后自动滚到底
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages]);
 
   const refresh = async () => {
     try {
@@ -482,9 +512,9 @@ function Content() {
           return;
         }
 
-        if (state.events.length > seenEventCount) {
-          const newEvents = state.events.slice(seenEventCount);
-          setSeenEventCount(state.events.length);
+        if (state.events.length > seenEventCountRef.current) {
+          const newEvents = state.events.slice(seenEventCountRef.current);
+          seenEventCountRef.current = state.events.length;
           const toolEvents = newEvents
             .filter((event) => event.type === "tool_start" || event.type === "tool_result")
             .map((event) => `${event.type}: ${event.name ?? ""}`)
@@ -534,7 +564,7 @@ function Content() {
     return () => {
       cancelled = true;
     };
-  }, [activeTurnId, pollVersion, seenEventCount]);
+  }, [activeTurnId, pollVersion]);
 
   const runInstall = async () => {
     setBusy(true);
@@ -565,7 +595,7 @@ function Content() {
     setBusy(true);
     appendMessage("user", text);
     try {
-      setSeenEventCount(0);
+      seenEventCountRef.current = 0;
       setPermissionRequest(null);
       const result = await startTurn(text);
       if (result.ok && result.turn_id) {
@@ -742,6 +772,7 @@ function Content() {
                 {message.text}
               </div>
             ))}
+            <div ref={messagesEndRef} />
           </div>
         </PanelSectionRow>
       </PanelSection>

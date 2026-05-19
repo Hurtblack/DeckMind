@@ -223,6 +223,8 @@ class RuntimeSession:
         if error is not None:
             return error
 
+        provider, model = self._llm_selection(self.config_store.get_runtime_config())
+
         self._turn_counter += 1
         turn_id = f"turn-{int(time.time() * 1000)}-{self._turn_counter}"
         turn: dict[str, Any] = {
@@ -240,21 +242,48 @@ class RuntimeSession:
         permission_provider = TurnPermissionProvider(turn)
         turn["permission_provider"] = permission_provider
         self._turns[turn_id] = turn
-        turn["task"] = asyncio.create_task(self._run_turn(turn, permission_provider))
+
+        # 限制 _turns 大小，避免长会话内存泄漏（保留最近 32 个 turn）
+        if len(self._turns) > 32:
+            stale = sorted(self._turns.keys())[: len(self._turns) - 32]
+            for key in stale:
+                self._turns.pop(key, None)
+
+        turn["task"] = asyncio.create_task(
+            self._run_turn(turn, permission_provider, provider, model)
+        )
         return {"ok": True, "turn_id": turn_id}
 
     async def _run_turn(
         self,
         turn: dict[str, Any],
         permission_provider: TurnPermissionProvider,
+        provider: str,
+        model: str | None,
     ) -> None:
         events = turn["events"]
         try:
-            agent = await self._create_agent(events, permission_provider)
+            # 复用 agent 保持对话上下文/记忆；首轮才创建
+            if self._agent is None:
+                self._agent = await self._create_agent(events, permission_provider)
+            else:
+                # 复用时把当前 turn 的 permission_provider 注入，让 UI 能处理权限请求
+                if hasattr(self._agent, "set_permission_provider"):
+                    self._agent.set_permission_provider(permission_provider)
+
+                async def emit(event: dict[str, Any]) -> None:
+                    events.append(event)
+
+                if hasattr(self._agent, "set_event_sink"):
+                    self._agent.set_event_sink(emit)
+
+            # 切换 LLM provider/model（若变化）
+            self._sync_agent_llm(self._agent, provider, model)
+
             with contextlib.redirect_stdout(io.StringIO()):
-                reply = await agent.handle(turn["message"])
+                reply = await self._agent.handle(turn["message"])
             turn["reply"] = reply
-            turn["model"] = getattr(agent, "model", None)
+            turn["model"] = getattr(self._agent, "model", None)
             turn["status"] = "completed"
         except Exception as e:
             turn["error"] = f"{type(e).__name__}: {e}"
