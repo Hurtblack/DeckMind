@@ -6,15 +6,19 @@ user's home directory on first run, then upgraded independently.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
 import shutil
 import tarfile
 import tempfile
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+
+DOWNLOAD_TIMEOUT = 30  # 秒：单次 HTTP 操作的上限
 
 
 DEFAULT_RUNTIME_URL = (
@@ -97,7 +101,31 @@ class RuntimeInstaller:
     def _download(self) -> Path:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         target = self.cache_dir / "deckmind-runtime.tar.gz"
-        urllib.request.urlretrieve(self.runtime_url, target)
+        try:
+            req = urllib.request.Request(
+                self.runtime_url,
+                headers={"User-Agent": "DeckMind-Installer"},
+            )
+            with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT) as resp, \
+                    target.open("wb") as out:
+                shutil.copyfileobj(resp, out)
+        except urllib.error.HTTPError as e:
+            target.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"下载 runtime 失败：HTTP {e.code} {e.reason}（URL: {self.runtime_url}）。"
+                f"请确认 GitHub Release 已发布，或设置 DECKMIND_RUNTIME_URL 指向自定义地址。"
+            ) from e
+        except urllib.error.URLError as e:
+            target.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"下载 runtime 网络错误：{e.reason}（URL: {self.runtime_url}）。"
+                f"请检查网络连通性或访问 GitHub 的能力。"
+            ) from e
+        except TimeoutError:
+            target.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"下载 runtime 超时（{DOWNLOAD_TIMEOUT}s）。请检查网络。"
+            )
         if self.runtime_sha256:
             actual = self._sha256(target)
             if actual.lower() != self.runtime_sha256.lower():
@@ -142,6 +170,19 @@ class RuntimeInstaller:
             "runtime_dir": str(self.runtime_dir),
             "version": manifest.get("version"),
         }
+
+    async def install_async(self) -> dict[str, Any]:
+        """从 async 上下文安全调用：在线程池里跑同步 install()，不阻塞事件循环。
+        任何异常被捕获，转成 {ok: False, error: ...}，UI 才能收到结构化反馈。"""
+        try:
+            return await asyncio.to_thread(self.install)
+        except Exception as e:
+            return {
+                "ok": False,
+                "installed": False,
+                "error": str(e),
+                "runtime_url": self.runtime_url,
+            }
 
 
 INSTALLER = RuntimeInstaller()

@@ -39,7 +39,7 @@ class Plugin:
         return CONFIG_STORE.save(config)
 
     async def install_runtime(self) -> dict:
-        return INSTALLER.install()
+        return await INSTALLER.install_async()
 
     async def ask(self, message: str) -> dict:
         result = await self.runtime.ask(message)
