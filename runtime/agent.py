@@ -28,6 +28,7 @@ from memory import SessionMemory
 
 from .context import format_context_for_prompt, gather_context
 from .executor import Executor
+from .interfaces import PermissionProvider, RuntimeEventSink
 from .planner import Planner
 from . import ui
 
@@ -38,23 +39,44 @@ MAX_STEPS = 8  # Hard cap to prevent runaway tool-calling.
 class Agent:
     """Owns the planner, executor, and bounded session memory."""
 
-    def __init__(self, *, verbose: bool = False, context_block: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        verbose: bool = False,
+        context_block: str = "",
+        permission_provider: PermissionProvider | None = None,
+        event_sink: RuntimeEventSink | None = None,
+    ) -> None:
         self.verbose = verbose
         client = make_client()
         self.model = client.model
         self.planner = Planner(client, context_block=context_block)
-        self.executor = Executor()
+        self.executor = Executor(
+            permission_provider=permission_provider,
+            event_sink=event_sink,
+        )
         self.memory = SessionMemory(max_turns=6)
         # Lifetime token counters across all turns this session.
         self.total_input_tokens = 0
         self.total_output_tokens = 0
 
     @classmethod
-    async def create(cls, *, verbose: bool = False) -> "Agent":
+    async def create(
+        cls,
+        *,
+        verbose: bool = False,
+        permission_provider: PermissionProvider | None = None,
+        event_sink: RuntimeEventSink | None = None,
+    ) -> "Agent":
         """Factory that gathers device context before building the agent."""
         ctx = await gather_context()
         block = format_context_for_prompt(ctx)
-        return cls(verbose=verbose, context_block=block)
+        return cls(
+            verbose=verbose,
+            context_block=block,
+            permission_provider=permission_provider,
+            event_sink=event_sink,
+        )
 
     # ----- per-turn display helpers -----
 

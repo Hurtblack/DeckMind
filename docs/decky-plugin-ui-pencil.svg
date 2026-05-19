@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900">
+  <defs>
+    <filter id="paper">
+      <feTurbulence type="fractalNoise" baseFrequency="0.018" numOctaves="3" seed="7"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer>
+        <feFuncA type="table" tableValues="0 0.06"/>
+      </feComponentTransfer>
+      <feBlend mode="multiply" in2="SourceGraphic"/>
+    </filter>
+    <filter id="pencil">
+      <feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="2" seed="11"/>
+      <feDisplacementMap in="SourceGraphic" scale="1.7"/>
+    </filter>
+    <style>
+      .paper { fill: #f4f0e8; }
+      .ink { stroke: #313131; stroke-width: 2.2; fill: none; stroke-linecap: round; stroke-linejoin: round; filter: url(#pencil); }
+      .thin { stroke: #4a4a4a; stroke-width: 1.35; fill: none; stroke-linecap: round; stroke-linejoin: round; filter: url(#pencil); }
+      .soft { fill: rgba(255,255,255,0.35); stroke: #313131; stroke-width: 2; filter: url(#pencil); }
+      .warn { fill: rgba(246,193,119,0.2); stroke: #785d28; stroke-width: 2; filter: url(#pencil); }
+      .ok { fill: rgba(102,217,168,0.18); stroke: #32654f; stroke-width: 2; filter: url(#pencil); }
+      .text { font-family: "Comic Sans MS", "Bradley Hand", "PingFang SC", sans-serif; fill: #252525; font-size: 20px; }
+      .small { font-size: 15px; fill: #444; }
+      .tiny { font-size: 13px; fill: #555; }
+      .title { font-size: 32px; font-weight: 700; }
+      .section { font-size: 19px; font-weight: 700; }
+      .button { fill: rgba(255,255,255,0.48); stroke: #303030; stroke-width: 1.8; filter: url(#pencil); }
+      .note { fill: #fff8d8; stroke: #8b7d40; stroke-width: 1.6; filter: url(#pencil); }
+    </style>
+  </defs>
+
+  <rect class="paper" width="1200" height="900"/>
+  <rect class="paper" width="1200" height="900" filter="url(#paper)"/>
+
+  <text class="text title" x="58" y="70">DeckMind Decky 插件线稿</text>
+  <text class="text small" x="60" y="100">按当前 GUI 代码绘制：Runtime 状态 / 配置 / 危险确认 / 对话入口</text>
+
+  <rect class="note" x="58" y="130" width="300" height="230" rx="10"/>
+  <text class="text section" x="78" y="166">安装场景</text>
+  <text class="text small" x="78" y="202">1. 市场安装 GUI shell</text>
+  <text class="text small" x="78" y="232">2. 首次打开显示 Runtime 状态</text>
+  <text class="text small" x="78" y="262">3. 可由插件安装 Runtime</text>
+  <text class="text small" x="78" y="292">4. 也可以先预部署 Runtime</text>
+  <text class="text small" x="78" y="322">5. 再让 AI/命令复制插件目录</text>
+
+  <path class="thin" d="M360 245 C420 245 450 245 502 245"/>
+  <path class="thin" d="M488 235 L506 245 L488 255"/>
+
+  <rect class="soft" x="510" y="96" width="430" height="760" rx="26"/>
+  <rect class="ink" x="535" y="125" width="380" height="700" rx="16"/>
+
+  <circle class="thin" cx="570" cy="160" r="13"/>
+  <path class="thin" d="M564 160 L570 152 L576 160 L570 168 Z"/>
+  <text class="text title" x="596" y="170">DeckMind</text>
+  <line class="thin" x1="555" y1="190" x2="895" y2="190"/>
+  <rect class="soft" x="675" y="198" width="220" height="28" rx="14"/>
+  <text class="text tiny" x="694" y="217">0.1.0 / OpenAI · 点击刷新</text>
+
+  <text class="text section" x="555" y="226">Runtime</text>
+  <rect class="ok" x="555" y="242" width="340" height="76" rx="8"/>
+  <circle class="thin" cx="580" cy="267" r="9"/>
+  <path class="thin" d="M575 267 L580 272 L587 260"/>
+  <text class="text small" x="598" y="272">已安装 0.1.0</text>
+  <text class="text tiny" x="572" y="300">~/.local/share/deckmind/runtime</text>
+  <rect class="button" x="555" y="330" width="340" height="38" rx="7"/>
+  <text class="text small" x="681" y="355">刷新状态</text>
+
+  <text class="text section" x="555" y="406">配置</text>
+  <rect class="soft" x="555" y="422" width="340" height="38" rx="7"/>
+  <text class="text small" x="572" y="447">Provider: OpenAI</text>
+  <path class="thin" d="M866 436 L876 446 L886 436"/>
+  <rect class="soft" x="555" y="470" width="340" height="38" rx="7"/>
+  <text class="text small" x="572" y="495">Model: gpt-4.1-mini</text>
+  <path class="thin" d="M866 484 L876 494 L886 484"/>
+  <rect class="soft" x="555" y="518" width="340" height="38" rx="7"/>
+  <text class="text small" x="572" y="543">API key 已保存，留空不修改</text>
+  <rect class="button" x="555" y="566" width="340" height="38" rx="7"/>
+  <text class="text small" x="682" y="591">保存配置</text>
+
+  <text class="text section" x="555" y="640">需要确认</text>
+  <rect class="warn" x="555" y="656" width="340" height="90" rx="8"/>
+  <text class="text small" x="572" y="682">system_command</text>
+  <text class="text tiny" x="572" y="710">即将执行命令，需要你确认</text>
+  <text class="text tiny" x="572" y="732">{ "cmd": "systemctl restart ..." }</text>
+  <rect class="button" x="555" y="758" width="100" height="38" rx="7"/>
+  <text class="text small" x="587" y="783">允许</text>
+  <rect class="button" x="674" y="758" width="112" height="38" rx="7"/>
+  <text class="text small" x="692" y="783">本会话允许</text>
+  <rect class="button" x="802" y="758" width="93" height="38" rx="7"/>
+  <text class="text small" x="833" y="783">拒绝</text>
+
+  <rect class="note" x="972" y="130" width="170" height="252" rx="10"/>
+  <text class="text section" x="992" y="166">预部署路径</text>
+  <text class="text tiny" x="992" y="202">如果先部署 runtime：</text>
+  <text class="text tiny" x="992" y="232">~/.local/share/</text>
+  <text class="text tiny" x="992" y="252">deckmind/runtime</text>
+  <text class="text tiny" x="992" y="292">再复制插件：</text>
+  <text class="text tiny" x="992" y="322">~/homebrew/plugins/</text>
+  <text class="text tiny" x="992" y="342">DeckMind</text>
+
+  <path class="thin" d="M964 294 C930 320 918 355 905 410"/>
+  <path class="thin" d="M899 392 L905 413 L918 396"/>
+
+  <rect class="soft" x="60" y="405" width="360" height="315" rx="12"/>
+  <text class="text section" x="82" y="442">对话区状态</text>
+  <rect class="soft" x="82" y="465" width="296" height="52" rx="8"/>
+  <text class="text tiny" x="100" y="494">DeckMind Runtime 已就绪...</text>
+  <rect class="ok" x="145" y="532" width="233" height="46" rx="8"/>
+  <text class="text tiny" x="165" y="561">用户：帮我清理缓存</text>
+  <rect class="warn" x="82" y="594" width="250" height="48" rx="8"/>
+  <text class="text tiny" x="100" y="623">tool_start: command</text>
+  <rect class="soft" x="82" y="658" width="296" height="38" rx="7"/>
+  <text class="text tiny" x="100" y="682">输入指令...</text>
+
+  <text class="text small" x="60" y="782">这个图表达的是当前 P0 GUI 的信息层级，不是最终视觉稿。</text>
+</svg>

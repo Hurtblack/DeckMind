@@ -23,7 +23,13 @@ from typing import Any
 
 from tools import get as get_tool
 
-from .prompt import ask, is_yes
+from .interfaces import (
+    PermissionProvider,
+    PermissionRequest,
+    RuntimeEventSink,
+    TerminalPermissionProvider,
+    null_event_sink,
+)
 
 
 # ---------- risk classification ----------
@@ -93,6 +99,8 @@ RISK_DESTRUCTIVE: set[str] = {
     "set_pacman_mirror_china",
     # Restricted command runner — still executes local user-level commands.
     "run_command",
+    # Replaces the Decky plugin directory under ~/homebrew/plugins.
+    "install_decky_plugin",
 }
 
 def _risk_of(name: str) -> str:
@@ -111,9 +119,49 @@ def _risk_of(name: str) -> str:
 class Executor:
     """Dispatches tool calls and asks the user before risky ones."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        permission_provider: PermissionProvider | None = None,
+        event_sink: RuntimeEventSink | None = None,
+    ) -> None:
         # Side-effect tools the user white-listed for this session.
         self._allow_all: set[str] = set()
+        self._permission_provider = permission_provider or TerminalPermissionProvider()
+        self._event_sink = event_sink or null_event_sink
+
+    async def _emit(self, event: dict[str, Any]) -> None:
+        await self._event_sink(event)
+
+    async def _request_permission(
+        self,
+        *,
+        name: str,
+        arguments: dict[str, Any],
+        risk: str,
+        message: str,
+    ) -> str:
+        request = PermissionRequest(
+            name=name,
+            arguments=arguments,
+            risk=risk,
+            message=message,
+        )
+        await self._emit({
+            "type": "permission_request",
+            "name": name,
+            "arguments": arguments,
+            "risk": risk,
+            "message": message,
+        })
+        decision = await self._permission_provider.request(request)
+        await self._emit({
+            "type": "permission_result",
+            "name": name,
+            "risk": risk,
+            "decision": decision,
+        })
+        return decision
 
     async def run(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Gate + dispatch one tool call."""
@@ -130,15 +178,22 @@ class Executor:
 
         elif risk == "side_effect":
             if name not in self._allow_all:
-                ans = await ask(
-                    f"    ⚠ side-effect: {name}({arguments})  "
-                    f"[y=允许 / n=拒绝 / a=本会话此工具全允许] > "
+                decision = await self._request_permission(
+                    name=name,
+                    arguments=arguments,
+                    risk=risk,
+                    message=(
+                        f"    ⚠ side-effect: {name}({arguments})  "
+                        f"[y=允许 / n=拒绝 / a=本会话此工具全允许] > "
+                    ),
                 )
-                if ans == "a":
+                if decision == "allow_all":
                     self._allow_all.add(name)
-                elif not (is_yes(ans) or ans == ""):
-                    return {"ok": False, "denied": True,
-                            "reason": f"user rejected side-effect call to {name}"}
+                elif decision != "allow":
+                    result = {"ok": False, "denied": True,
+                              "reason": f"user rejected side-effect call to {name}"}
+                    await self._emit({"type": "tool_result", "name": name, "result": result})
+                    return result
 
         elif risk == "destructive":
             confirm = bool(arguments.get("confirm", False))
@@ -147,23 +202,39 @@ class Executor:
                 # don't pester the user mid-batch (e.g. uninstalling
                 # several flatpaks in a row).
                 if name not in self._allow_all:
-                    ans = await ask(
-                        f"    🚨 DESTRUCTIVE: {name}({arguments})  "
-                        f"[y=确认执行 / n=取消 / a=本会话此工具全允许] > "
+                    decision = await self._request_permission(
+                        name=name,
+                        arguments=arguments,
+                        risk=risk,
+                        message=(
+                            f"    🚨 DESTRUCTIVE: {name}({arguments})  "
+                            f"[y=确认执行 / n=取消 / a=本会话此工具全允许] > "
+                        ),
                     )
-                    if ans == "a":
+                    if decision == "allow_all":
                         self._allow_all.add(name)
-                    elif not is_yes(ans):
-                        return {"ok": False, "denied": True,
-                                "reason": f"user rejected destructive call to {name}"}
+                    elif decision != "allow":
+                        result = {"ok": False, "denied": True,
+                                  "reason": f"user rejected destructive call to {name}"}
+                        await self._emit({"type": "tool_result", "name": name, "result": result})
+                        return result
             # confirm=False is a dry-run — harmless, pass through silently.
 
         # ----- execute -----
+        await self._emit({
+            "type": "tool_start",
+            "name": name,
+            "arguments": arguments,
+            "risk": risk,
+        })
         try:
-            return await fn(**arguments)
+            result = await fn(**arguments)
         except TypeError as e:
             # Wrong/missing args — common LLM mistake. Report cleanly so
             # the planner can correct itself on the next turn.
-            return {"ok": False, "error": f"bad arguments for {name}: {e}"}
+            result = {"ok": False, "error": f"bad arguments for {name}: {e}"}
         except Exception as e:  # pragma: no cover — defensive
-            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+            result = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+        await self._emit({"type": "tool_result", "name": name, "result": result})
+        return result

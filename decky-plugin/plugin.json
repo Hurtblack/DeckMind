@@ -1,0 +1,11 @@
+{
+  "name": "DeckMind",
+  "author": "Hurtblack",
+  "flags": ["debug", "_root"],
+  "api_version": 1,
+  "publish": {
+    "tags": ["agent", "steam-deck", "automation"],
+    "description": "Thin Decky shell for installing and controlling the DeckMind agent runtime.",
+    "image": "https://opengraph.githubassets.com/1/Hurtblack/DeckMind"
+  }
+}

@@ -209,7 +209,7 @@ chmod +x ~/DeckMind/run-agent.sh
 |---|---|---|---|
 | OpenAI（Responses API） | `openai`（默认） | `OPENAI_API_KEY` | `gpt-4o-mini` |
 | OpenAI（Chat Completions） | `openai-chat` | `OPENAI_API_KEY` | `gpt-4o-mini` |
-| **DeepSeek** | `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-chat` |
+| **DeepSeek** | `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-v4-flash` |
 | Moonshot (Kimi) | `moonshot` | `MOONSHOT_API_KEY` | `moonshot-v1-8k` |
 | 通义千问 (Qwen) | `qwen` | `DASHSCOPE_API_KEY` | `qwen-plus` |
 

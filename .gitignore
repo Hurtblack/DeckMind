@@ -26,3 +26,9 @@ venv/
 
 # Logs / runtime
 *.log
+
+# Decky frontend
+node_modules/
+dist/
+out/
+pnpm-debug.log*

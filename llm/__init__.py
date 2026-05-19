@@ -43,7 +43,7 @@ PROVIDERS: dict[str, dict] = {
         "client": "chat",
         "api_key_env": "DEEPSEEK_API_KEY",
         "base_url": "https://api.deepseek.com",
-        "default_model": "deepseek-chat",
+        "default_model": "deepseek-v4-flash",
     },
     # Moonshot (Kimi) — https://platform.moonshot.cn/
     "moonshot": {

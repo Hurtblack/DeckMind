@@ -15,7 +15,7 @@ from typing import Any, Awaitable, Callable
 from llm.base import ToolSpec
 
 from . import (
-    command_tool, file_tool, file_write_tool, macro_tool, notion_tool,
+    command_tool, decky_plugin_tool, file_tool, file_write_tool, macro_tool, notion_tool,
     package_tool, pacman_tool, profile_tool, steam_tool,
     steamos_lock as steamos_lock_tool, system_tool, update_tool,
 )
@@ -438,6 +438,34 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
                     },
                 },
                 "required": ["argv"],
+            },
+        ),
+    ),
+    "install_decky_plugin": (
+        decky_plugin_tool.install_decky_plugin,
+        ToolSpec(
+            name="install_decky_plugin",
+            description=(
+                "Deploy the bundled DeckMind Decky plugin into Decky's "
+                "homebrew/plugins directory. DESTRUCTIVE — call first with "
+                "confirm=false for a dry-run preview, then with confirm=true "
+                "after the user explicitly approves. Copies only the packaged "
+                "plugin files and excludes source, node_modules, scripts, and "
+                "build config files."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target_dir": {
+                        "type": "string",
+                        "description": (
+                            "Optional target directory. Defaults to "
+                            "~/homebrew/plugins/DeckMind and must be under "
+                            "a homebrew/plugins directory."
+                        ),
+                    },
+                    "confirm": {"type": "boolean", "default": False},
+                },
             },
         ),
     ),

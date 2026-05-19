@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>DeckMind — Decky QAM Panel Preview</title>
+<style>
+  :root {
+    --panel: rgba(20, 23, 28, 0.72);
+    --border: rgba(255, 255, 255, 0.12);
+    --muted: rgba(232, 238, 246, 0.62);
+    --text: rgba(246, 248, 252, 0.96);
+    --accent: #66d9a8;
+    --warn: #f6c177;
+    --danger: #ff7b72;
+    --input-bg: rgba(0, 0, 0, 0.22);
+    --surface: #1a1f27;
+  }
+  html, body {
+    margin: 0; padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #2a2a2e;
+    min-height: 100vh;
+    color: var(--text);
+  }
+  .stage {
+    display: flex; gap: 32px; padding: 32px;
+    justify-content: center; align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .stage > section {
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .stage h3 {
+    margin: 0; font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase;
+    color: #bbb; font-weight: 600;
+  }
+  /* Decky QAM panel approx 346px wide. We use 380 to match the React component's natural sizing. */
+  .panel {
+    width: 346px;
+    background: #0b0e13;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    display: flex; flex-direction: column; gap: 10px;
+    box-shadow: 0 24px 48px rgba(0,0,0,0.4);
+  }
+  .title-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 2px 2px 8px;
+    font-weight: 700; font-size: 16px; letter-spacing: 0.06em;
+  }
+  .status-bar {
+    display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+    background: rgba(13, 17, 23, 0.88);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    cursor: pointer;
+    margin: -4px -12px 0;
+    padding: 8px 12px;
+  }
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    border-radius: 12px;
+    font-size: 11px; font-weight: 600;
+    padding: 3px 8px;
+  }
+  .badge.ok {
+    background: rgba(102, 217, 168, 0.09);
+    border: 1px solid rgba(102, 217, 168, 0.25);
+    color: var(--accent);
+  }
+  .badge.warn {
+    background: rgba(246, 193, 119, 0.09);
+    border: 1px solid rgba(246, 193, 119, 0.25);
+    color: var(--warn);
+  }
+  .section-title {
+    color: var(--muted);
+    font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+    padding: 6px 0 0;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .card.warn { border-color: var(--warn); }
+  .card.warn-soft { background: rgba(246, 193, 119, 0.12); border-color: var(--warn); }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .muted { color: var(--muted); font-size: 12px; line-height: 1.35; word-break: break-all; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  .button {
+    appearance: none; border: 1px solid var(--border); background: var(--surface);
+    color: var(--text); font: inherit; font-size: 13px; font-weight: 600;
+    border-radius: 8px; min-height: 36px; padding: 0 12px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    cursor: pointer; width: 100%;
+  }
+  .button.accent { background: rgba(102, 217, 168, 0.16); border-color: var(--accent); color: var(--accent); }
+  .button.danger { background: rgba(255, 123, 114, 0.16); border-color: var(--danger); color: var(--danger); }
+  .button + .button { margin-top: 0; }
+
+  .stack { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+
+  select.input, input.input {
+    appearance: none;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    min-height: 36px;
+    padding: 7px 9px;
+    font: inherit; font-size: 13px;
+    width: 100%; box-sizing: border-box;
+  }
+  select.input {
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+      linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position:
+      calc(100% - 16px) 15px,
+      calc(100% - 10px) 15px;
+    background-size: 6px 6px, 6px 6px;
+    background-repeat: no-repeat;
+    padding-right: 30px;
+  }
+  input.input::placeholder { color: var(--muted); }
+  input.input.warn-edge { border-color: var(--warn); }
+
+  .chat {
+    display: flex; flex-direction: column; gap: 8px;
+    max-height: 320px; min-height: 160px; overflow-y: auto;
+    padding-right: 2px;
+  }
+  .bubble {
+    max-width: 92%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    line-height: 1.35;
+    white-space: pre-wrap; word-break: break-word;
+    font-size: 13px;
+  }
+  .bubble.assistant { align-self: flex-start; background: rgba(255,255,255,0.08); }
+  .bubble.user { align-self: flex-end; background: rgba(102, 217, 168, 0.16); }
+  .bubble.system { align-self: flex-start; background: rgba(246, 193, 119, 0.12); border-color: rgba(246, 193, 119, 0.28); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+
+  .composer { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+  .composer input { min-height: 38px; font-size: 14px; padding: 8px 10px; }
+
+  .icon { font-style: normal; }
+</style>
+</head>
+<body>
+  <div class="stage">
+
+    <section>
+      <h3>状态 A — 未安装 Runtime（初始态）</h3>
+      <div class="panel" aria-label="DeckMind QAM panel - initial">
+        <div class="title-bar"><span class="icon">🧠</span><span>DeckMind</span></div>
+        <div class="status-bar" title="点击刷新状态">
+          <span class="badge warn">⚠ 未安装</span>
+          <span class="badge warn">🔑 未配置</span>
+        </div>
+
+        <div class="section-title">Runtime</div>
+        <div class="card warn">
+          <div class="row"><span style="color:var(--warn)">⚠</span><strong>未安装 Runtime</strong></div>
+          <div class="muted">https://github.com/your-org/deckmind/releases/latest/runtime.tar.gz</div>
+        </div>
+        <div class="stack">
+          <button class="button"><span>⬇</span> 安装 Runtime</button>
+          <button class="button"><span>↻</span> 刷新状态</button>
+        </div>
+
+        <div class="section-title">配置</div>
+        <div class="stack">
+          <select class="input">
+            <option>OpenAI</option><option>OpenAI Chat</option><option>DeepSeek</option>
+            <option>Moonshot</option><option>Qwen</option>
+          </select>
+          <select class="input">
+            <option>GPT-4.1 Mini</option><option>GPT-4.1</option><option>GPT-4o Mini</option>
+          </select>
+          <input class="input warn-edge" type="password" placeholder="输入 API key">
+          <button class="button">保存配置</button>
+        </div>
+
+        <div class="section-title">对话</div>
+        <div class="chat">
+          <div class="bubble assistant">先安装 DeckMind Runtime。安装完成后，这个面板会作为 Decky 里的 agent 入口。</div>
+        </div>
+
+        <div class="composer">
+          <input class="input" type="text" placeholder="先安装 Runtime" disabled>
+          <button class="button" disabled><span>➤</span> 发送</button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h3>状态 B — 已安装 + 权限弹层 + 对话进行中</h3>
+      <div class="panel" aria-label="DeckMind QAM panel - active">
+        <div class="title-bar"><span class="icon">🧠</span><span>DeckMind</span></div>
+        <div class="status-bar" title="点击刷新状态">
+          <span class="badge ok">✓ 0.3.1</span>
+          <span class="badge ok">🔑 OpenAI</span>
+        </div>
+
+        <div class="section-title">配置</div>
+        <div class="stack">
+          <select class="input"><option>OpenAI</option></select>
+          <select class="input"><option>GPT-4o Mini</option></select>
+          <input class="input" type="password" placeholder="API key 已保存，留空不修改">
+          <button class="button">保存配置</button>
+        </div>
+
+        <div class="section-title">需要确认</div>
+        <div class="card warn-soft">
+          <div style="font-weight:700">shell.run</div>
+          <div class="muted">Agent 想运行 shell 命令 `steamos-readonly status`。是否允许？</div>
+          <div class="muted mono">{"cmd":"steamos-readonly status"}</div>
+        </div>
+        <div class="stack">
+          <button class="button accent">允许</button>
+          <button class="button">本会话允许</button>
+          <button class="button danger">拒绝</button>
+        </div>
+
+        <div class="section-title">对话</div>
+        <div class="chat">
+          <div class="bubble assistant">DeckMind Runtime 已就绪。输入指令即可开始。</div>
+          <div class="bubble user">帮我看一下系统温度和电池电量</div>
+          <div class="bubble system">tool_start: shell.run
+tool_result: shell.run</div>
+          <div class="bubble assistant">CPU 65°C，电池 78%（放电中）。一切正常。</div>
+        </div>
+
+        <div class="composer">
+          <input class="input" type="text" placeholder="输入指令...">
+          <button class="button accent"><span>➤</span> 发送</button>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</body>
+</html>
