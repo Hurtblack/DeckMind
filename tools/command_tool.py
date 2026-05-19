@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import shutil
 import time
@@ -82,6 +83,13 @@ _TRUSTED_EXECUTABLE_DIRS: tuple[str, ...] = (
     "/opt/homebrew/bin",
 )
 _TRUSTED_PATH = ":".join(_TRUSTED_EXECUTABLE_DIRS)
+_COMMAND_TIMEOUT_SECONDS = 60
+_EXEC_ENV = {
+    "PATH": _TRUSTED_PATH,
+    "HOME": str(Path.home()),
+    "LANG": os.environ.get("LANG", "C.UTF-8"),
+    "LC_ALL": os.environ.get("LC_ALL", "C.UTF-8"),
+}
 
 
 def _reject(argv: list[str], reason: str, command: str | None = None) -> ValidationResult:
@@ -241,21 +249,21 @@ def _validate_curl(argv: list[str]) -> ValidationResult:
         path, path_reason = _validate_approved_write_path(output)
         if path_reason:
             return _reject(argv, path_reason, command=command)
-        exec_argv = list(argv)
-        exec_argv[3] = str(path)
+        exec_argv = [argv[0], "-q", *argv[1:]]
+        exec_argv[4] = str(path)
         return _validated(exec_argv, command, output_path=str(path))
 
     if len(argv) == 3 and argv[1] == "-I":
         url_reason = _validate_url(argv[2])
         if url_reason:
             return _reject(argv, url_reason, command=command)
-        return _validated(argv, command, read_only=True)
+        return _validated([argv[0], "-q", *argv[1:]], command, read_only=True)
 
     if len(argv) == 4 and argv[1:3] == ["-L", "-I"]:
         url_reason = _validate_url(argv[3])
         if url_reason:
             return _reject(argv, url_reason, command=command)
-        return _validated(argv, command, read_only=True)
+        return _validated([argv[0], "-q", *argv[1:]], command, read_only=True)
 
     return _reject(argv, "unsupported curl form", command=command)
 
@@ -273,8 +281,8 @@ def _validate_wget(argv: list[str]) -> ValidationResult:
     if path_reason:
         return _reject(argv, path_reason, command=command)
 
-    exec_argv = list(argv)
-    exec_argv[2] = str(path)
+    exec_argv = [argv[0], "--no-config", *argv[1:]]
+    exec_argv[3] = str(path)
     return _validated(exec_argv, command, output_path=str(path))
 
 
@@ -390,6 +398,7 @@ async def _execute_validated(validation: ValidationResult) -> dict[str, Any]:
             *validation.argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=dict(_EXEC_ENV),
         )
     except OSError as exc:
         elapsed = time.monotonic() - started
@@ -409,7 +418,10 @@ async def _execute_validated(validation: ValidationResult) -> dict[str, Any]:
 
     communicate = proc.communicate()
     try:
-        stdout, stderr = await asyncio.wait_for(communicate, timeout=60)
+        stdout, stderr = await asyncio.wait_for(
+            communicate,
+            timeout=_COMMAND_TIMEOUT_SECONDS,
+        )
     except asyncio.TimeoutError:
         if hasattr(communicate, "close"):
             communicate.close()
@@ -434,7 +446,10 @@ async def _execute_validated(validation: ValidationResult) -> dict[str, Any]:
                 "output_size_bytes": None,
                 "read_only": validation.read_only,
                 "output_path": validation.output_path,
-                "error": f"command timed out after 60 seconds; failed to drain output: {exc}",
+                "error": (
+                    f"command timed out after {_COMMAND_TIMEOUT_SECONDS} "
+                    f"seconds; failed to drain output: {exc}"
+                ),
             }
         elapsed = time.monotonic() - started
         return {
@@ -448,7 +463,7 @@ async def _execute_validated(validation: ValidationResult) -> dict[str, Any]:
             "output_size_bytes": None,
             "read_only": validation.read_only,
             "output_path": validation.output_path,
-            "error": "command timed out after 60 seconds",
+            "error": f"command timed out after {_COMMAND_TIMEOUT_SECONDS} seconds",
         }
     elapsed = time.monotonic() - started
 

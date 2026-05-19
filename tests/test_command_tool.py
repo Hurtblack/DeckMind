@@ -59,10 +59,11 @@ class CommandToolValidationTests(unittest.TestCase):
         self.assertNotEqual(result.argv[0], "curl")
         self.assertTrue(Path(result.argv[0]).is_absolute())
         self.assertEqual(
-            result.argv[3],
+            result.argv[4],
             str((Path.home() / "Downloads" / "Clash.Verge.AppImage").resolve(strict=False)),
         )
-        self.assertNotIn("~", result.argv[3])
+        self.assertEqual(result.argv[1], "-q")
+        self.assertNotIn("~", result.argv[4])
 
     def test_allows_curl_header_check(self) -> None:
         result = validate_command([
@@ -74,6 +75,27 @@ class CommandToolValidationTests(unittest.TestCase):
 
         self.assertTrue(result.ok)
         self.assertTrue(result.read_only)
+        self.assertEqual(result.argv[1], "-q")
+
+    def test_wget_download_disables_user_config(self) -> None:
+        from unittest.mock import patch
+
+        module = load_command_tool()
+
+        with patch("shutil.which", return_value="/usr/bin/wget"):
+            result = module.validate_command([
+                "wget",
+                "-O",
+                "~/Downloads/app.AppImage",
+                "https://example.com/app.AppImage",
+            ])
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.argv[1], "--no-config")
+        self.assertEqual(
+            result.argv[3],
+            str((Path.home() / "Downloads" / "app.AppImage").resolve(strict=False)),
+        )
 
     def test_rejects_shell_compound_command(self) -> None:
         result = validate_command([
@@ -285,6 +307,44 @@ class CommandToolExecutionFailureTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(result["returncode"], -1)
         self.assertIn("timed out after 60 seconds", result["error"])
+
+    def test_execute_validated_uses_minimal_environment(self) -> None:
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+
+        module = load_command_tool()
+
+        class FakeProcess:
+            returncode = 0
+
+            async def communicate(self):
+                return b"/bin/sh\n", b""
+
+        captured = {}
+
+        async def fake_create_subprocess_exec(*argv, **kwargs):
+            captured["argv"] = argv
+            captured["env"] = kwargs.get("env")
+            return FakeProcess()
+
+        validation = module.ValidationResult(True, ["/usr/bin/which", "sh"], command="which", read_only=True)
+
+        async def execute_with_env_capture():
+            with patch.object(
+                module.asyncio,
+                "create_subprocess_exec",
+                AsyncMock(side_effect=fake_create_subprocess_exec),
+            ):
+                return await module._execute_validated(validation)
+
+        result = asyncio.run(execute_with_env_capture())
+
+        self.assertTrue(result["ok"])
+        self.assertIsNotNone(captured["env"])
+        self.assertIn("PATH", captured["env"])
+        self.assertNotIn("LD_PRELOAD", captured["env"])
+        self.assertNotIn("CURL_HOME", captured["env"])
+        self.assertNotIn("WGETRC", captured["env"])
 
     def test_execute_validated_returns_structured_startup_failure(self) -> None:
         import asyncio
