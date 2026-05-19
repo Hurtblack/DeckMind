@@ -11,10 +11,13 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 GIT_TIMEOUT = 120  # 秒，单次 git 操作超时
+PIP_TIMEOUT = 300  # 秒，pip install 超时（首次装 openai 等较慢）
+VENDOR_DIR_NAME = ".vendor"  # runtime 内放第三方依赖的子目录
 
 
 DEFAULT_RUNTIME_REPO = "https://github.com/Hurtblack/DeckMind.git"
@@ -146,6 +149,65 @@ class RuntimeInstaller:
             )
         return result.stdout
 
+    def _find_system_python(self) -> str | None:
+        """找一个系统 Python 来跑 pip（避免用 Decky bundled 的、可能没 pip 的解释器）。"""
+        for candidate in ("/usr/bin/python3", "/usr/bin/python", "python3", "python"):
+            try:
+                result = subprocess.run(
+                    [candidate, "-c", "import pip; print(pip.__version__)"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    env=self._clean_env(),
+                )
+                if result.returncode == 0:
+                    return candidate
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                continue
+        return None
+
+    def _install_python_deps(self) -> dict[str, Any]:
+        """把 requirements.txt 装到 runtime/.vendor 里，runtime 启动时会 sys.path 这里。
+
+        失败不抛——返回 {ok: false, error: ...} 以便用户能看到 runtime 已安装
+        但缺依赖的状态，并手动重试。
+        """
+        req_file = self.runtime_dir / "requirements.txt"
+        if not req_file.exists():
+            return {"ok": True, "skipped": "no_requirements"}
+
+        vendor = self.runtime_dir / VENDOR_DIR_NAME
+        python = self._find_system_python()
+        if python is None:
+            return {
+                "ok": False,
+                "error": "未找到系统 Python（带 pip）。请在 Konsole 执行："
+                f" python3 -m pip install --target {vendor} -r {req_file}",
+            }
+
+        try:
+            result = subprocess.run(
+                [
+                    python, "-m", "pip", "install",
+                    "--target", str(vendor),
+                    "--upgrade",
+                    "-r", str(req_file),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=PIP_TIMEOUT,
+                env=self._clean_env(),
+            )
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": f"pip install 超时（{PIP_TIMEOUT}s）"}
+
+        if result.returncode != 0:
+            return {
+                "ok": False,
+                "error": f"pip install 失败:\n{result.stderr.strip() or result.stdout.strip()}",
+            }
+        return {"ok": True, "vendor": str(vendor), "python": python}
+
     def install(self) -> dict[str, Any]:
         """首次安装 (git clone) 或更新 (git pull)。"""
         parent = self.runtime_dir.parent
@@ -177,12 +239,16 @@ class RuntimeInstaller:
                 ]
             )
 
+        # git clone / pull 完成后，安装 Python 依赖到 runtime/.vendor
+        deps_result = self._install_python_deps()
+
         commit = self._git_commit() or "unknown"
         manifest = {
             "version": commit,
             "source": self.repo_url,
             "branch": self.branch,
             "action": action,
+            "deps": deps_result,
         }
         self.manifest_path.write_text(
             json.dumps(manifest, indent=2), encoding="utf-8"

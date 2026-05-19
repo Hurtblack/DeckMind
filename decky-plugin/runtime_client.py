@@ -165,9 +165,12 @@ class RuntimeSession:
                 events=events,
             )
 
+        # 把 runtime 目录 + .vendor (装第三方依赖如 openai) 加到 sys.path
         runtime_path = str(self.runtime_dir)
-        if runtime_path not in sys.path:
-            sys.path.insert(0, runtime_path)
+        vendor_path = str(self.runtime_dir / ".vendor")
+        for p in (vendor_path, runtime_path):
+            if Path(p).exists() and p not in sys.path:
+                sys.path.insert(0, p)
 
         runtime_module = importlib.import_module("runtime")
         agent_cls = getattr(runtime_module, "Agent")
