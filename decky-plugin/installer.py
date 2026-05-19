@@ -21,8 +21,25 @@ DEFAULT_RUNTIME_URL = (
     "https://github.com/Hurtblack/DeckMind/releases/latest/download/"
     "deckmind-runtime.tar.gz"
 )
-RUNTIME_HOME = Path.home() / "deckmind" / "runtime"
-CACHE_HOME = Path.home() / "deckmind" / ".cache"
+def _xdg_dir(env_var: str, default_subpath: str) -> Path:
+    """遵循 XDG Base Directory 规范解析路径，支持环境变量覆盖。"""
+    base = os.environ.get(env_var)
+    if base:
+        return Path(base).expanduser()
+    return Path.home() / default_subpath
+
+
+# 数据放 $XDG_DATA_HOME/deckmind/runtime  (默认 ~/.local/share/deckmind/runtime)
+# 缓存放 $XDG_CACHE_HOME/deckmind         (默认 ~/.cache/deckmind)
+# 调试时可用 DECKMIND_RUNTIME_DIR / DECKMIND_CACHE_DIR 覆盖整条路径
+RUNTIME_HOME = Path(
+    os.environ.get("DECKMIND_RUNTIME_DIR")
+    or _xdg_dir("XDG_DATA_HOME", ".local/share") / "deckmind" / "runtime"
+)
+CACHE_HOME = Path(
+    os.environ.get("DECKMIND_CACHE_DIR")
+    or _xdg_dir("XDG_CACHE_HOME", ".cache") / "deckmind"
+)
 MANIFEST_NAME = "deckmind-runtime.json"
 
 
