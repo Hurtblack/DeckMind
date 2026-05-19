@@ -45,9 +45,9 @@ class ChatCompletionsClient(LLMClient):
             elif h.kind == "tool_call":
                 # Chat Completions wants tool_calls attached to an assistant
                 # message with content=None.
-                msgs.append({
+                message: dict[str, Any] = {
                     "role": "assistant",
-                    "content": None,
+                    "content": h.text,
                     "tool_calls": [{
                         "id": h.call_id,
                         "type": "function",
@@ -56,7 +56,10 @@ class ChatCompletionsClient(LLMClient):
                             "arguments": json.dumps(h.arguments),
                         },
                     }],
-                })
+                }
+                if h.reasoning_content:
+                    message["reasoning_content"] = h.reasoning_content
+                msgs.append(message)
             elif h.kind == "tool_result":
                 msgs.append({
                     "role": "tool",
@@ -90,6 +93,7 @@ class ChatCompletionsClient(LLMClient):
         # `index`. Each entry: {"id": str, "name": str, "args": str}.
         tc_buffer: dict[int, dict[str, str]] = {}
         text_parts: list[str] = []
+        reasoning_parts: list[str] = []
         in_tok = 0
         out_tok = 0
 
@@ -123,6 +127,10 @@ class ChatCompletionsClient(LLMClient):
                 if on_text_delta is not None:
                     on_text_delta(delta.content)
 
+            reasoning_content = getattr(delta, "reasoning_content", None)
+            if reasoning_content:
+                reasoning_parts.append(reasoning_content)
+
             # Tool-call fragments → glue them together by `index`.
             for tc in (delta.tool_calls or []):
                 idx = tc.index
@@ -146,6 +154,7 @@ class ChatCompletionsClient(LLMClient):
                 name=slot["name"],
                 arguments=args,
                 call_id=slot["id"],
+                reasoning_content="".join(reasoning_parts) or None,
             ))
 
         return PlanResult(

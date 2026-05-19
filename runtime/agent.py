@@ -155,9 +155,11 @@ class Agent:
 
             history.append(HistoryItem(
                 kind="tool_call",
+                text=result.text or None,
                 name=call.name,
                 arguments=call.arguments,
                 call_id=call.call_id,
+                reasoning_content=call.reasoning_content,
             ))
 
             self._print_tool_start(call.name, call.arguments)

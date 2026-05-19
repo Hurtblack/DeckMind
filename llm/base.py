@@ -18,6 +18,7 @@ class PlannedCall:
     name: str
     arguments: dict[str, Any]
     call_id: str   # opaque id used to correlate the tool result later
+    reasoning_content: str | None = None
 
 
 @dataclass
@@ -52,6 +53,7 @@ class HistoryItem:
     """
     kind: str
     text: str | None = None
+    reasoning_content: str | None = None
     name: str | None = None
     arguments: dict[str, Any] = field(default_factory=dict)
     call_id: str | None = None
