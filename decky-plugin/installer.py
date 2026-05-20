@@ -465,24 +465,6 @@ class RuntimeInstaller:
         else:
             self._emit("deps.A", "skip",
                        f"系统未安装 python{decky_ver_str}，走跨版本路径")
-            pep668 = (
-                "externally-managed-environment" in msg
-                or "No module named pip" in msg
-            )
-            if pep668:
-                self._emit("deps.A", "info",
-                           "系统 pip 被 PEP 668 锁定，建 venv 重试")
-                venv_python, venv_log = self._ensure_venv_python(matched)
-                if venv_python:
-                    ok, msg = self._pip_install_to_vendor(venv_python, vendor, req_file)
-                    attempt(f"venv_python{decky_ver_str}", ok, msg,
-                            {"venv_python": venv_python, "venv_log": venv_log})
-                    if ok:
-                        return {"ok": True, "vendor": str(vendor),
-                                "via": f"venv_python{decky_ver_str}",
-                                "decky_python": decky_ver_str,
-                                "venv_log": venv_log,
-                                "attempts": attempts}
 
         # ---------- Strategy B/C: cross-version pip via any Python ----------
         any_python = self._find_system_python()
