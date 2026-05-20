@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 GIT_TIMEOUT = 120  # 秒，单次 git 操作超时
+GIT_RETRIES = 4  # git 网络错误重试次数（Deck 访问 GitHub 不稳定）
 PIP_TIMEOUT = 300  # 秒，pip install 超时（首次装 openai 等较慢）
 VENDOR_DIR_NAME = ".vendor"  # runtime 内放第三方依赖的子目录
 
@@ -218,28 +219,65 @@ class RuntimeInstaller:
         return env
 
     def _run_git(self, args: list[str], cwd: Path | None = None) -> str:
-        """跑 git 命令，捕获 stdout+stderr，超时/失败抛 RuntimeError。"""
-        try:
-            result = subprocess.run(
-                ["git", *args],
-                cwd=str(cwd) if cwd else None,
-                capture_output=True,
-                text=True,
-                timeout=GIT_TIMEOUT,
-                check=False,
-                env=self._clean_env(),
+        """跑 git 命令；网络类错误自动重试，超时/最终失败抛 RuntimeError。
+
+        Deck 访问 GitHub 经常间歇性失败（SSL_ERROR_SYSCALL / Connection reset /
+        timeout，尤其国内网络）。这里对网络错误重试 GIT_RETRIES 次，每次退避递增。
+        """
+        # 网络不稳时给 git 加点韧性
+        git_env = self._clean_env()
+        git_env.setdefault("GIT_HTTP_LOW_SPEED_LIMIT", "1000")
+        git_env.setdefault("GIT_HTTP_LOW_SPEED_TIME", str(GIT_TIMEOUT))
+
+        last_err = ""
+        for attempt in range(1, GIT_RETRIES + 1):
+            try:
+                result = subprocess.run(
+                    ["git", "-c", "http.postBuffer=524288000", *args],
+                    cwd=str(cwd) if cwd else None,
+                    capture_output=True,
+                    text=True,
+                    timeout=GIT_TIMEOUT,
+                    check=False,
+                    env=git_env,
+                )
+            except FileNotFoundError as e:
+                raise RuntimeError("系统未安装 git，请先 sudo pacman -S git") from e
+            except subprocess.TimeoutExpired:
+                last_err = f"git 操作超时（{GIT_TIMEOUT}s）"
+                if attempt < GIT_RETRIES:
+                    self._emit("git", "retry",
+                               f"超时，重试 {attempt}/{GIT_RETRIES - 1}")
+                    time.sleep(attempt * 2)
+                    continue
+                raise RuntimeError(f"{last_err}，已重试 {GIT_RETRIES} 次仍失败，网络不通")
+
+            if result.returncode == 0:
+                return result.stdout
+
+            err = result.stderr.strip() or result.stdout.strip()
+            last_err = err
+            # 判断是否网络类错误（值得重试）
+            transient = any(
+                kw in err
+                for kw in (
+                    "SSL_ERROR_SYSCALL", "Connection reset", "Could not resolve",
+                    "Connection timed out", "unable to access", "Recv failure",
+                    "TLS", "GnuTLS", "early EOF", "RPC failed", "fetch-pack",
+                )
             )
-        except FileNotFoundError as e:
-            raise RuntimeError("系统未安装 git，请先 sudo pacman -S git") from e
-        except subprocess.TimeoutExpired as e:
+            if transient and attempt < GIT_RETRIES:
+                self._emit("git", "retry",
+                           f"网络错误，重试 {attempt}/{GIT_RETRIES - 1}")
+                time.sleep(attempt * 2)
+                continue
             raise RuntimeError(
-                f"git 操作超时（{GIT_TIMEOUT}s），可能网络不通"
-            ) from e
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"git {' '.join(args)} 失败:\n{result.stderr.strip() or result.stdout.strip()}"
+                f"git {' '.join(args)} 失败"
+                + (f"（已重试 {GIT_RETRIES} 次）" if transient else "")
+                + f":\n{err}"
             )
-        return result.stdout
+
+        raise RuntimeError(f"git {' '.join(args)} 失败:\n{last_err}")
 
     def _decky_python_version(self) -> tuple[int, int]:
         """Decky 内置 Python 的 (major, minor)。
