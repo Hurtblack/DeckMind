@@ -24,8 +24,11 @@ type RuntimeStatus = {
   installed: boolean;
   runtime_dir: string;
   version: string | null;
+  commit?: string | null;
   entrypoint: string;
-  runtime_url: string;
+  runtime_url?: string;
+  repo_url?: string;
+  branch?: string;
   config?: RuntimeConfig;
 };
 
@@ -356,16 +359,21 @@ function StatusBar({
 function RuntimeCard({
   busy,
   onInstall,
+  onUpdate,
   onRefresh,
   status,
 }: {
   busy: boolean;
   onInstall: () => void;
+  onUpdate: () => void;
   onRefresh: () => void;
   status: RuntimeStatus | null;
 }) {
   const installed = Boolean(status?.installed);
-  const label = installed ? `已安装 ${status?.version ?? "unknown"}` : "未安装 Runtime";
+  const commit = status?.commit ?? null;
+  const label = installed
+    ? `已安装${commit ? ` · ${commit}` : ` ${status?.version ?? "unknown"}`}`
+    : "未安装 Runtime";
   const detail = installed ? status?.runtime_dir : status?.runtime_url;
 
   return (
@@ -399,6 +407,14 @@ function RuntimeCard({
               <span style={{ alignItems: "center", display: "inline-flex", gap: 8 }}>
                 <FaDownload />
                 安装 Runtime
+              </span>
+            </ButtonItem>
+          )}
+          {installed && (
+            <ButtonItem disabled={busy} layout="below" onClick={onUpdate}>
+              <span style={{ alignItems: "center", display: "inline-flex", gap: 8 }}>
+                <FaDownload />
+                更新 Runtime（git pull）
               </span>
             </ButtonItem>
           )}
@@ -586,7 +602,7 @@ function Content() {
     saveHistory(messages);
   }, [messages]);
 
-  const refresh = async () => {
+  const refresh = async (): Promise<RuntimeStatus | null> => {
     try {
       const [latestStatus, latestConfig] = await Promise.all([
         getStatus(),
@@ -605,10 +621,12 @@ function Content() {
               },
             ],
       );
+      return latestStatus;
     } catch (error) {
       const body = String(error);
       appendMessage("system", body);
       toaster.toast({ title: "DeckMind 状态读取失败", body });
+      return null;
     }
   };
 
@@ -683,7 +701,7 @@ function Content() {
     };
   }, [activeTurnId, pollVersion]);
 
-  const runInstall = async () => {
+  const runInstall = async (isUpdate = false) => {
     setBusy(true);
     let cursor = 0;
     let pollTimer: number | undefined;
@@ -704,7 +722,10 @@ function Content() {
     };
 
     try {
-      appendMessage("system", "▶ 开始下载并安装 Runtime...");
+      appendMessage(
+        "system",
+        isUpdate ? "▶ 正在更新 Runtime（git pull）..." : "▶ 开始下载并安装 Runtime...",
+      );
       // Reset the backend cursor by reading total once before kicking off.
       try {
         const seed = await getInstallProgress(0);
@@ -720,14 +741,17 @@ function Content() {
       // Flush any events emitted between the last poll and finish.
       await drain();
 
-      await refresh();
+      const latest = await refresh();
       if (result.ok) {
+        const commit = latest?.commit ?? null;
         appendMessage(
           "assistant",
-          `Runtime 已安装到 ${result.runtime_dir ?? "本机目录"}`,
+          isUpdate
+            ? `Runtime 已更新${commit ? ` 到 ${commit}` : ""}`
+            : `Runtime 已安装到 ${result.runtime_dir ?? "本机目录"}`,
         );
       } else {
-        appendMessage("system", `✗ ${result.error ?? "Runtime 安装失败"}`);
+        appendMessage("system", `✗ ${result.error ?? "Runtime 操作失败"}`);
       }
     } catch (error) {
       const body = String(error);
@@ -801,7 +825,8 @@ function Content() {
     [busy, draft, status?.installed],
   );
 
-  const shouldShowRuntimeCard = status?.installed === false;
+  // 未安装时强制显示（引导安装）；已安装时跟随配置面板展开，方便点"更新 Runtime"
+  const shouldShowRuntimeCard = status?.installed === false || configOpen;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -854,7 +879,8 @@ function Content() {
       {shouldShowRuntimeCard && (
         <RuntimeCard
           busy={busy}
-          onInstall={() => void runInstall()}
+          onInstall={() => void runInstall(false)}
+          onUpdate={() => void runInstall(true)}
           onRefresh={() => void refresh()}
           status={status}
         />

@@ -296,9 +296,12 @@ function StatusBar({ busy, config, configOpen, onRefresh, onToggleConfig, status
                     }
                 }, role: "button", tabIndex: 0, "aria-pressed": configOpen, "aria-label": hasApiKey ? "切换 provider / 模型 / API key" : "配置 provider 和 API key", title: hasApiKey ? "点击切换 provider 或更换 API key" : "点击配置 API key", children: [SP_JSX.jsx(FaKey, { size: 11 }), hasApiKey ? config?.provider ?? "API" : "未配置", SP_JSX.jsx("span", { style: { opacity: 0.6, fontSize: 9, marginLeft: 2 }, children: configOpen ? "▴" : "▾" })] })] }));
 }
-function RuntimeCard({ busy, onInstall, onRefresh, status, }) {
+function RuntimeCard({ busy, onInstall, onUpdate, onRefresh, status, }) {
     const installed = Boolean(status?.installed);
-    const label = installed ? `已安装 ${status?.version ?? "unknown"}` : "未安装 Runtime";
+    const commit = status?.commit ?? null;
+    const label = installed
+        ? `已安装${commit ? ` · ${commit}` : ` ${status?.version ?? "unknown"}`}`
+        : "未安装 Runtime";
     const detail = installed ? status?.runtime_dir : status?.runtime_url;
     return (SP_JSX.jsxs(DFL.PanelSection, { title: "Runtime", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: {
                         background: colors.panel,
@@ -309,7 +312,7 @@ function RuntimeCard({ busy, onInstall, onRefresh, status, }) {
                         flexDirection: "column",
                         gap: 8,
                         padding: 10,
-                    }, children: [SP_JSX.jsxs("div", { style: { alignItems: "center", display: "flex", gap: 8 }, children: [installed ? SP_JSX.jsx(FaCheckCircle, { color: colors.accent }) : SP_JSX.jsx(FaExclamationTriangle, { color: colors.warn }), SP_JSX.jsx("strong", { children: label })] }), SP_JSX.jsx("div", { style: { color: colors.muted, fontSize: 12, lineHeight: 1.35, wordBreak: "break-word" }, children: detail })] }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 8, width: "100%" }, children: [!installed && (SP_JSX.jsx(DFL.ButtonItem, { disabled: busy, layout: "below", onClick: onInstall, children: SP_JSX.jsxs("span", { style: { alignItems: "center", display: "inline-flex", gap: 8 }, children: [SP_JSX.jsx(FaDownload, {}), "\u5B89\u88C5 Runtime"] }) })), SP_JSX.jsx(DFL.ButtonItem, { disabled: busy, layout: "below", onClick: onRefresh, children: SP_JSX.jsxs("span", { style: { alignItems: "center", display: "inline-flex", gap: 8 }, children: [SP_JSX.jsx(FaSync, {}), "\u5237\u65B0\u72B6\u6001"] }) })] }) })] }));
+                    }, children: [SP_JSX.jsxs("div", { style: { alignItems: "center", display: "flex", gap: 8 }, children: [installed ? SP_JSX.jsx(FaCheckCircle, { color: colors.accent }) : SP_JSX.jsx(FaExclamationTriangle, { color: colors.warn }), SP_JSX.jsx("strong", { children: label })] }), SP_JSX.jsx("div", { style: { color: colors.muted, fontSize: 12, lineHeight: 1.35, wordBreak: "break-word" }, children: detail })] }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 8, width: "100%" }, children: [!installed && (SP_JSX.jsx(DFL.ButtonItem, { disabled: busy, layout: "below", onClick: onInstall, children: SP_JSX.jsxs("span", { style: { alignItems: "center", display: "inline-flex", gap: 8 }, children: [SP_JSX.jsx(FaDownload, {}), "\u5B89\u88C5 Runtime"] }) })), installed && (SP_JSX.jsx(DFL.ButtonItem, { disabled: busy, layout: "below", onClick: onUpdate, children: SP_JSX.jsxs("span", { style: { alignItems: "center", display: "inline-flex", gap: 8 }, children: [SP_JSX.jsx(FaDownload, {}), "\u66F4\u65B0 Runtime\uFF08git pull\uFF09"] }) })), SP_JSX.jsx(DFL.ButtonItem, { disabled: busy, layout: "below", onClick: onRefresh, children: SP_JSX.jsxs("span", { style: { alignItems: "center", display: "inline-flex", gap: 8 }, children: [SP_JSX.jsx(FaSync, {}), "\u5237\u65B0\u72B6\u6001"] }) })] }) })] }));
 }
 function ConfigCard({ busy, config, onSaved, onApiKeySaved, }) {
     const [provider, setProvider] = SP_REACT.useState(config?.provider ?? "openai");
@@ -429,11 +432,13 @@ function Content() {
                         text: welcomeMessageForStatus(latestStatus),
                     },
                 ]);
+            return latestStatus;
         }
         catch (error) {
             const body = String(error);
             appendMessage("system", body);
             toaster.toast({ title: "DeckMind 状态读取失败", body });
+            return null;
         }
     };
     SP_REACT.useEffect(() => {
@@ -499,7 +504,7 @@ function Content() {
             cancelled = true;
         };
     }, [activeTurnId, pollVersion]);
-    const runInstall = async () => {
+    const runInstall = async (isUpdate = false) => {
         setBusy(true);
         let cursor = 0;
         let pollTimer;
@@ -519,7 +524,7 @@ function Content() {
             }
         };
         try {
-            appendMessage("system", "▶ 开始下载并安装 Runtime...");
+            appendMessage("system", isUpdate ? "▶ 正在更新 Runtime（git pull）..." : "▶ 开始下载并安装 Runtime...");
             // Reset the backend cursor by reading total once before kicking off.
             try {
                 const seed = await getInstallProgress(0);
@@ -534,12 +539,15 @@ function Content() {
             const result = await installRuntime();
             // Flush any events emitted between the last poll and finish.
             await drain();
-            await refresh();
+            const latest = await refresh();
             if (result.ok) {
-                appendMessage("assistant", `Runtime 已安装到 ${result.runtime_dir ?? "本机目录"}`);
+                const commit = latest?.commit ?? null;
+                appendMessage("assistant", isUpdate
+                    ? `Runtime 已更新${commit ? ` 到 ${commit}` : ""}`
+                    : `Runtime 已安装到 ${result.runtime_dir ?? "本机目录"}`);
             }
             else {
-                appendMessage("system", `✗ ${result.error ?? "Runtime 安装失败"}`);
+                appendMessage("system", `✗ ${result.error ?? "Runtime 操作失败"}`);
             }
         }
         catch (error) {
@@ -605,7 +613,8 @@ function Content() {
             : []);
     };
     const canSend = SP_REACT.useMemo(() => Boolean(status?.installed) && draft.trim().length > 0 && !busy, [busy, draft, status?.installed]);
-    const shouldShowRuntimeCard = status?.installed === false;
+    // 未安装时强制显示（引导安装）；已安装时跟随配置面板展开，方便点"更新 Runtime"
+    const shouldShowRuntimeCard = status?.installed === false || configOpen;
     return (SP_JSX.jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 10 }, children: [SP_JSX.jsxs("div", { style: {
                     position: "sticky",
                     top: 0,
@@ -626,7 +635,7 @@ function Content() {
                             fontWeight: 600,
                             gap: 4,
                             padding: "0 10px",
-                        }, children: [SP_JSX.jsx(FaTrash, { size: 11 }), "\u6E05\u7A7A"] }), SP_JSX.jsx("div", { style: { flex: 1 }, children: SP_JSX.jsx(StatusBar, { busy: busy, config: config, configOpen: configOpen, onRefresh: () => void refresh(), onToggleConfig: () => setConfigOpen((open) => !open), status: status }) })] }), shouldShowRuntimeCard && (SP_JSX.jsx(RuntimeCard, { busy: busy, onInstall: () => void runInstall(), onRefresh: () => void refresh(), status: status })), (!config?.has_api_key || configOpen) && (SP_JSX.jsx(ConfigCard, { busy: busy, config: config, onSaved: (saved) => {
+                        }, children: [SP_JSX.jsx(FaTrash, { size: 11 }), "\u6E05\u7A7A"] }), SP_JSX.jsx("div", { style: { flex: 1 }, children: SP_JSX.jsx(StatusBar, { busy: busy, config: config, configOpen: configOpen, onRefresh: () => void refresh(), onToggleConfig: () => setConfigOpen((open) => !open), status: status }) })] }), shouldShowRuntimeCard && (SP_JSX.jsx(RuntimeCard, { busy: busy, onInstall: () => void runInstall(false), onUpdate: () => void runInstall(true), onRefresh: () => void refresh(), status: status })), (!config?.has_api_key || configOpen) && (SP_JSX.jsx(ConfigCard, { busy: busy, config: config, onSaved: (saved) => {
                     setConfig(saved);
                     appendMessage("system", "配置已保存");
                 }, onApiKeySaved: () => setConfigOpen(false) })), permissionRequest && (SP_JSX.jsx(DFL.PanelSection, { title: "\u9700\u8981\u786E\u8BA4", children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: {
