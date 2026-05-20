@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 
-CONFIG_HOME = Path.home() / ".config" / "deckmind"
+def _deck_user_home() -> Path:
+    """deck 用户的 home 目录（即使当前进程以 root 运行）。"""
+    env = os.environ.get("DECKY_USER_HOME")
+    if env:
+        return Path(env)
+    return Path.home()
+
+
+CONFIG_HOME = _deck_user_home() / ".config" / "deckmind"
 CONFIG_PATH = CONFIG_HOME / "config.json"
 
 

@@ -26,12 +26,29 @@ DEFAULT_RUNTIME_REPO = "https://github.com/Hurtblack/DeckMind.git"
 DEFAULT_BRANCH = "main"
 
 
+def _deck_user_home() -> Path:
+    """deck 用户的 home 目录（即使当前进程以 root 运行）。
+
+    Decky Loader 注入 DECKY_USER_HOME 环境变量，其值始终为 /home/deck；
+    没有时回退到 Path.home()（本地开发/测试场景）。
+    """
+    env = os.environ.get("DECKY_USER_HOME")
+    if env:
+        return Path(env)
+    return Path.home()
+
+
+def _deck_user() -> str:
+    """deck 用户名。"""
+    return os.environ.get("DECKY_USER") or "deck"
+
+
 def _xdg_dir(env_var: str, default_subpath: str) -> Path:
     """遵循 XDG Base Directory 规范解析路径，支持环境变量覆盖。"""
     base = os.environ.get(env_var)
     if base:
         return Path(base).expanduser()
-    return Path.home() / default_subpath
+    return _deck_user_home() / default_subpath
 
 
 # 数据放 $XDG_DATA_HOME/deckmind/runtime  (默认 ~/.local/share/deckmind/runtime)
@@ -142,6 +159,41 @@ class RuntimeInstaller:
             "repo_url": self.repo_url,
             "branch": self.branch,
         }
+
+    def _fix_permissions(self) -> None:
+        """将 runtime + cache 目录归属修正为 deck 用户。
+
+        当 Decky Loader (systemd, root) 拉起的 plugin 进程以 root 身份运行时，
+        git clone / pip install 写出的文件 owner 是 root，导致 deck 用户后续
+        rsync 部署或手动操作时 Permission denied。这里递归 chown 回 deck:deck。
+
+        仅当当前进程是 root 且目标用户不是 root 时才做，普通用户运行则是 no-op。
+        """
+        if os.getuid() != 0:
+            return
+        try:
+            import pwd
+            target = _deck_user()
+            pw = pwd.getpwnam(target)
+            uid, gid = pw.pw_uid, pw.pw_gid
+            if uid == 0:
+                return  # 目标用户就是 root，不需要改
+        except (KeyError, ImportError):
+            return
+
+        for _dir in (self.runtime_dir, self.cache_dir):
+            if not _dir.exists():
+                continue
+            try:
+                os.chown(str(_dir), uid, gid)
+            except OSError:
+                pass
+            for root, dirs, files in os.walk(str(_dir)):
+                for name in dirs + files:
+                    try:
+                        os.chown(os.path.join(root, name), uid, gid)
+                    except OSError:
+                        pass
 
     def _clean_env(self) -> dict[str, str]:
         """剔除 Decky Loader (PyInstaller 打包) 注入的运行时环境变量。
@@ -559,6 +611,8 @@ class RuntimeInstaller:
             json.dumps(manifest, indent=2), encoding="utf-8"
         )
         self._emit("manifest", "ok", f"已写入 {self.manifest_path.name}")
+
+        self._fix_permissions()
 
         return {
             "ok": True,

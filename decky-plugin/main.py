@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -19,6 +20,32 @@ from installer import INSTALLER
 from runtime_client import RuntimeSession
 
 
+def _fix_plugin_dir_permissions() -> None:
+    """将 plugin 目录下由 root 写出的文件改回 deck 用户。
+
+    Decky Loader 以 root 拉起的 plugin 后端在 import 时生成的 __pycache__/
+    及日志等文件归属 root，会阻断 deck 用户后续 rsync 部署。
+    仅当当前进程是 root 且目标用户不是 root 时才做。
+    """
+    if os.getuid() != 0:
+        return
+    try:
+        import pwd
+        pw = pwd.getpwnam(os.environ.get("DECKY_USER") or "deck")
+        uid, gid = pw.pw_uid, pw.pw_gid
+        if uid == 0:
+            return
+    except (KeyError, ImportError):
+        return
+
+    for root, dirs, files in os.walk(str(_PLUGIN_DIR)):
+        for name in dirs + files:
+            try:
+                os.chown(os.path.join(root, name), uid, gid)
+            except OSError:
+                pass
+
+
 class Plugin:
     """Thin Decky backend for installing and talking to DeckMind runtime."""
 
@@ -29,6 +56,7 @@ class Plugin:
         )
 
     async def _main(self) -> None:
+        _fix_plugin_dir_permissions()
         if decky is not None:
             decky.logger.info("DeckMind shell backend started")
 
