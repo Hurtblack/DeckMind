@@ -93,6 +93,43 @@ _TRUSTED_EXECUTABLE_DIRS: tuple[str, ...] = (
 )
 _TRUSTED_PATH = ":".join(_TRUSTED_EXECUTABLE_DIRS)
 _COMMAND_TIMEOUT_SECONDS = 60
+
+# Commands that only read state — no filesystem writes, no daemon control,
+# no network changes. The executor treats run_command with one of these
+# as "safe" (no confirmation prompt) and the validator returns
+# read_only=True / risk_level=normal so the dry-run dance is skipped.
+_READ_ONLY_COMMANDS: frozenset[str] = frozenset({
+    # File inspection
+    "cat", "head", "tail", "tac", "nl", "od", "xxd", "hexdump",
+    # Listing / metadata
+    "ls", "stat", "wc", "du", "df", "tree",
+    # Hashing
+    "md5sum", "sha1sum", "sha256sum", "sha512sum", "b2sum", "cksum",
+    # Text processing (read-only forms — see _READ_ONLY_FLAG_DENY for sed/find)
+    "grep", "egrep", "fgrep", "rg", "awk", "gawk", "cut", "sort", "uniq",
+    "tr", "fold", "fmt", "expand", "unexpand", "column", "paste", "join",
+    "comm", "diff", "cmp", "sed", "find",
+    # Paths
+    "realpath", "readlink", "basename", "dirname",
+    # Processes
+    "ps", "pgrep", "pidof",
+    # System info
+    "uname", "hostname", "whoami", "id", "groups", "uptime", "free",
+    "date", "env", "printenv", "locale", "nproc", "arch", "lsblk",
+    "lscpu", "lsmod", "lsusb", "lspci", "getent",
+    # Trivial output
+    "echo", "printf", "pwd", "true", "false",
+    # Logs (read-only; -f tails until timeout)
+    "journalctl", "dmesg",
+})
+
+# Flags that turn an otherwise read-only command into a write. Matched
+# by startswith() so `-i.bak` is caught alongside `-i`.
+_READ_ONLY_FLAG_DENY: dict[str, tuple[str, ...]] = {
+    "sed": ("-i", "--in-place"),
+    "find": ("-delete", "-exec", "-execdir", "-ok", "-okdir",
+             "-fprint", "-fprintf", "-fls"),
+}
 _EXEC_ENV = {
     "PATH": _TRUSTED_PATH,
     "HOME": str(Path.home()),
@@ -329,6 +366,8 @@ def validate_command(argv: list[str], advanced: bool = False) -> ValidationResul
         validation = _validate_tar(argv)
     elif command == "launch_file":
         return _validate_launch_file(argv)
+    elif command in _READ_ONLY_COMMANDS:
+        validation = _validate_read_only(argv)
     else:
         if advanced:
             return _validate_advanced_command(argv)
@@ -345,6 +384,46 @@ def validate_command(argv: list[str], advanced: bool = False) -> ValidationResul
 
     validation.argv[0] = executable or validation.argv[0]
     return validation
+
+
+def _validate_read_only(argv: list[str]) -> ValidationResult:
+    """Validate a member of `_READ_ONLY_COMMANDS`.
+
+    Rejects flags that would turn it into a write (sed -i, find -delete,
+    find -exec, ...). Otherwise marks the call as read_only=True so the
+    executor and run_command can skip the confirmation gate.
+    """
+    command = argv[0]
+    deny = _READ_ONLY_FLAG_DENY.get(command, ())
+    if deny:
+        for arg in argv[1:]:
+            for bad in deny:
+                if arg == bad or arg.startswith(bad + "="):
+                    return _reject(argv, f"{command} {bad} is not a read-only form",
+                                   command=command)
+                # `sed -i.bak` / `find -execdir` already handled above; also
+                # block `-i` followed by a separate suffix arg.
+                if bad == "-i" and arg.startswith("-i") and arg != "-i":
+                    return _reject(argv, f"{command} {arg} is not a read-only form",
+                                   command=command)
+    return _validated(list(argv), command, read_only=True)
+
+
+def is_read_only_invocation(arguments: dict[str, Any]) -> bool:
+    """Quick check used by the executor to skip prompting on read-only calls.
+
+    Returns True only if validation succeeds AND the command is in the
+    read-only allowlist. Anything ambiguous returns False so the normal
+    destructive gate still runs.
+    """
+    argv = arguments.get("argv")
+    if not isinstance(argv, list) or not argv:
+        return False
+    try:
+        validation = validate_command(argv, advanced=False)
+    except Exception:
+        return False
+    return validation.ok and validation.read_only
 
 
 def _validate_advanced_command(argv: list[str]) -> ValidationResult:
@@ -596,6 +675,12 @@ async def run_command(
             "reason": validation.reason,
             "argv": validation.argv,
         }
+
+    # Read-only commands (cat, ls, grep, wc, sed -n, ...) bypass the
+    # dry-run / confirm dance. The executor also classifies them as
+    # "safe" so the user never sees a prompt.
+    if validation.read_only and validation.risk_level == "normal":
+        return await _execute_validated(validation)
 
     requires_high_risk_confirm = validation.risk_level == "high"
     if confirm and requires_high_risk_confirm and not high_risk_confirm:

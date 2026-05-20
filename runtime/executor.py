@@ -171,6 +171,15 @@ class Executor:
 
         risk = _risk_of(name)
 
+        # run_command is destructive by default, but a call that only
+        # reads state (cat / ls / grep / wc / sed -n / ...) is harmless;
+        # treat it as safe so the user isn't asked to confirm every
+        # `cat plugin.json`.
+        if name == "run_command":
+            from tools.command_tool import is_read_only_invocation
+            if is_read_only_invocation(arguments):
+                risk = "safe"
+
         # ----- permission gate -----
 
         if risk == "safe":

@@ -80,6 +80,19 @@ Available tool categories:
              run_command(..., confirm=false), then after user approval
              call run_command(..., confirm=true).
 
+             Read-only inspection commands run with NO confirm/advanced
+             flags — call run_command(argv=[...]) directly and the user
+             sees no prompt. This covers: cat, head, tail, ls, stat,
+             wc, du, df, tree, grep/rg/egrep, awk, cut, sort, uniq,
+             diff, cmp, sed (only without -i), find (only without
+             -delete/-exec), realpath, readlink, basename, dirname,
+             ps, pgrep, pidof, uname, hostname, whoami, id, uptime,
+             free, date, env, printenv, lsblk/lscpu/lsmod/lsusb/lspci,
+             md5sum/sha256sum/xxd/hexdump, journalctl, dmesg, echo,
+             pwd. Do not pass confirm/advanced/high_risk_confirm for
+             these — it adds friction and the executor will still skip
+             the prompt either way.
+
              For commands outside the normal run_command allowlist, use
              advanced=true only when the task is still user-level and the
              argv form contains no shell syntax. Preview first with

@@ -257,9 +257,11 @@ class CommandToolAdvancedValidationTests(unittest.TestCase):
         from unittest.mock import patch
 
         module = load_command_tool()
-        with patch("shutil.which", return_value="/usr/bin/pgrep"):
+        # `ss` is a socket diagnostic; not in the read-only allowlist
+        # (some forms add/modify routes), so advanced mode is required.
+        with patch("shutil.which", return_value="/usr/bin/ss"):
             result = module.validate_command(
-                ["pgrep", "-a", "clash"],
+                ["ss", "-tuln"],
                 advanced=True,
             )
 
@@ -267,7 +269,7 @@ class CommandToolAdvancedValidationTests(unittest.TestCase):
         self.assertTrue(result.advanced)
         self.assertEqual(result.risk_level, "high")
         self.assertIn("advanced command", result.risk_reason or "")
-        self.assertEqual(result.argv[0], "/usr/bin/pgrep")
+        self.assertEqual(result.argv[0], "/usr/bin/ss")
 
     def test_advanced_mode_blocks_hardline_command(self) -> None:
         module = load_command_tool()
@@ -292,9 +294,9 @@ class CommandToolAdvancedValidationTests(unittest.TestCase):
         module = load_command_tool()
 
         async def run_without_high_risk_confirm():
-            with patch("shutil.which", return_value="/usr/bin/pgrep"):
+            with patch("shutil.which", return_value="/usr/bin/ss"):
                 return await module.run_command(
-                    ["pgrep", "-a", "clash"],
+                    ["ss", "-tuln"],
                     confirm=True,
                     advanced=True,
                 )
@@ -466,13 +468,15 @@ class CommandToolArchiveAndLaunchTests(unittest.TestCase):
 
 
 class CommandToolExecutionPathTests(unittest.IsolatedAsyncioTestCase):
-    async def test_run_command_returns_dry_run_preview_without_confirmation(self) -> None:
+    async def test_run_command_executes_read_only_without_confirmation(self) -> None:
+        """Read-only commands (which, cat, ls, ...) bypass the dry-run dance."""
         module = load_command_tool()
 
         result = await module.run_command(["which", "sh"], confirm=False)
 
         self.assertTrue(result["ok"])
-        self.assertTrue(result["dry_run"])
+        self.assertNotIn("dry_run", result)
+        self.assertTrue(result["read_only"])
         self.assertEqual(result["command"], "which")
 
     async def test_run_command_executes_harmless_which_with_confirmation(self) -> None:
