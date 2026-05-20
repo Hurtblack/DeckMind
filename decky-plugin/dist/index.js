@@ -214,12 +214,78 @@ function saveHistory(messages) {
     }
 }
 async function copyToClipboard(text) {
+    // 1) 优先用现代 API（部分 Steam CEF 上下文可用）
     try {
-        await navigator.clipboard.writeText(text);
-        toaster.toast({ title: "DeckMind", body: "已复制到剪贴板" });
+        if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text);
+            toaster.toast({ title: "DeckMind", body: "已复制到剪贴板" });
+            return;
+        }
+    }
+    catch {
+        /* 落到下面的 fallback */
+    }
+    // 2) Fallback：隐藏 textarea + execCommand('copy')
+    // Steam gamescope 的 CEF 常禁用 navigator.clipboard（非安全上下文），
+    // 但老的 execCommand 仍可用。
+    try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.top = "-9999px";
+        ta.style.left = "-9999px";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        ta.setSelectionRange(0, text.length);
+        const ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        toaster.toast({
+            title: "DeckMind",
+            body: ok ? "已复制到剪贴板" : "复制失败，请手动选择文本",
+        });
     }
     catch {
         toaster.toast({ title: "DeckMind", body: "复制失败，请手动选择文本" });
+    }
+}
+// 通过 Steam 内部 API 执行前端动作（启动/关闭游戏），避免 steam:// URI 的确认弹窗。
+// 返回人类可读的结果文案，供对话区显示。
+function runFrontendAction(action) {
+    // SteamClient 由 Steam 注入、@decky/ui 提供类型。其 Apps 上的具体方法签名
+    // 在不同 Steam 版本间会变，这里用 any 调用以保持兼容。
+    const apps = SteamClient?.Apps;
+    if (!apps) {
+        return "✗ 当前环境没有 SteamClient（可能不在 Steam 中运行），无法直接启动游戏";
+    }
+    const gameId = action.game_id ?? action.app_id;
+    if (!gameId) {
+        return "✗ 缺少 app_id / game_id，无法启动";
+    }
+    const label = action.game ?? gameId;
+    try {
+        if (action.type === "run_game") {
+            const run = apps.RunGame;
+            if (!run) {
+                return "✗ SteamClient.Apps.RunGame 不可用";
+            }
+            run(gameId, "", -1, 100);
+            return `▶ 已通过 Steam 启动「${label}」（appid ${gameId}）`;
+        }
+        if (action.type === "terminate_game") {
+            const terminate = apps.TerminateApp;
+            if (!terminate) {
+                return "✗ SteamClient.Apps.TerminateApp 不可用";
+            }
+            terminate(gameId, false);
+            return `■ 已通过 Steam 关闭「${label}」`;
+        }
+        return `✗ 未知前端动作：${action.type}`;
+    }
+    catch (e) {
+        return `✗ 调用 SteamClient 失败：${String(e)}`;
     }
 }
 function messageStyle(role) {
@@ -458,6 +524,14 @@ function Content() {
                 if (state.events.length > seenEventCountRef.current) {
                     const newEvents = state.events.slice(seenEventCountRef.current);
                     seenEventCountRef.current = state.events.length;
+                    // 后端 tool 返回的 frontend_action：用 SteamClient 在前端执行
+                    // （启动/关闭游戏走 Steam 内部调用，无确认弹窗）。
+                    for (const event of newEvents) {
+                        const action = event.result?.frontend_action;
+                        if (event.type === "tool_result" && action) {
+                            appendMessage("system", runFrontendAction(action));
+                        }
+                    }
                     const toolEvents = newEvents
                         .filter((event) => event.type === "tool_start" || event.type === "tool_result")
                         .map((event) => `${event.type}: ${event.name ?? ""}`)
@@ -688,23 +762,20 @@ function Content() {
                             minHeight: 160,
                             overflowY: "auto",
                             paddingRight: 2,
-                        }, children: [messages.map((message) => {
-                                const isError = message.role === "system" && message.text.startsWith("✗");
-                                return (SP_JSX.jsxs("div", { style: { ...messageStyle(message.role), position: "relative" }, children: [isError && (SP_JSX.jsxs("div", { role: "button", tabIndex: 0, onClick: () => void copyToClipboard(message.text), title: "\u590D\u5236\u9519\u8BEF\u4FE1\u606F", style: {
-                                                position: "absolute",
-                                                top: 4,
-                                                right: 4,
-                                                display: "flex",
-                                                alignItems: "center",
-                                                gap: 4,
-                                                padding: "2px 6px",
-                                                borderRadius: 6,
-                                                cursor: "pointer",
-                                                background: "rgba(0, 0, 0, 0.28)",
-                                                color: colors.muted,
-                                                fontSize: 11,
-                                            }, children: [SP_JSX.jsx(FaCopy, { size: 10 }), "\u590D\u5236"] })), SP_JSX.jsx("div", { style: isError ? { paddingRight: 52 } : undefined, children: message.text })] }, message.id));
-                            }), SP_JSX.jsx("div", { ref: messagesEndRef })] }) }) }), SP_JSX.jsx(DFL.PanelSection, { children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 8, width: "100%" }, children: [SP_JSX.jsx("input", { disabled: !status?.installed || busy, onChange: (event) => setDraft(event.currentTarget.value), onKeyDown: (event) => {
+                        }, children: [messages.map((message) => (SP_JSX.jsxs("div", { style: { ...messageStyle(message.role), position: "relative" }, children: [SP_JSX.jsxs("div", { role: "button", tabIndex: 0, onClick: () => void copyToClipboard(message.text), title: "\u590D\u5236\u8FD9\u6761\u6D88\u606F", style: {
+                                            position: "absolute",
+                                            top: 4,
+                                            right: 4,
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: 4,
+                                            padding: "2px 6px",
+                                            borderRadius: 6,
+                                            cursor: "pointer",
+                                            background: "rgba(0, 0, 0, 0.28)",
+                                            color: colors.muted,
+                                            fontSize: 11,
+                                        }, children: [SP_JSX.jsx(FaCopy, { size: 10 }), "\u590D\u5236"] }), SP_JSX.jsx("div", { style: { paddingRight: 52 }, children: message.text })] }, message.id))), SP_JSX.jsx("div", { ref: messagesEndRef })] }) }) }), SP_JSX.jsx(DFL.PanelSection, { children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 8, width: "100%" }, children: [SP_JSX.jsx("input", { disabled: !status?.installed || busy, onChange: (event) => setDraft(event.currentTarget.value), onKeyDown: (event) => {
                                     if (event.key === "Enter") {
                                         void send();
                                     }

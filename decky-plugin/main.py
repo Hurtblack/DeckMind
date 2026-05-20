@@ -10,6 +10,10 @@ _PLUGIN_DIR = Path(__file__).resolve().parent
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
+# 告诉 runtime 的 steam_tool：在 Decky 里运行，启动/关闭游戏走前端
+# SteamClient（无 steam:// 确认弹窗），而不是后端 subprocess 调 steam。
+os.environ.setdefault("DECKMIND_FRONTEND_LAUNCH", "1")
+
 try:
     import decky
 except ImportError:  # pragma: no cover - Decky exists inside decky-loader.

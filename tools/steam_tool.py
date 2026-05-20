@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import os
 import shutil
 from typing import Any
 
@@ -17,6 +18,18 @@ from typing import Any
 def _session_env() -> dict[str, str]:
     # Lazy import to avoid runtime/__init__.py circular load.
     return importlib.import_module("runtime.session_env").session_env()
+
+
+def _frontend_launch_enabled() -> bool:
+    """是否走前端 SteamClient 启动（无确认弹窗）。
+
+    在 Decky 插件里运行时，plugin 后端会设 DECKMIND_FRONTEND_LAUNCH=1。
+    此时 launch/close 游戏不在后端 subprocess 调 steam（那会触发 Steam 的
+    外部 steam:// URI 确认弹窗），而是返回 frontend_action 让插件前端用
+    SteamClient.Apps.RunGame / TerminateApp 内部调用，无弹窗。
+    CLI 环境不设此变量，仍走 subprocess。
+    """
+    return os.environ.get("DECKMIND_FRONTEND_LAUNCH") == "1"
 
 # A small mock registry so the demo works even without a real Steam install.
 # Map a human-friendly name -> Steam AppID.
@@ -78,6 +91,16 @@ async def launch_game(game_name: str) -> dict[str, Any]:
                          f"alias list and not found in your installed Steam "
                          f"library. Try a more specific name or install it first."}
     key = resolved or game_name.strip().lower()
+
+    # Decky 环境：交给前端 SteamClient 启动，避免 steam:// 确认弹窗。
+    if _frontend_launch_enabled():
+        return {
+            "ok": True,
+            "game": key,
+            "app_id": app_id,
+            "frontend_action": {"type": "run_game", "app_id": app_id, "game": key},
+            "note": "已请求 Steam 内部启动（前端 SteamClient，无确认弹窗）。",
+        }
 
     if not _has_steam():
         # Mock branch — useful on macOS / CI / dev machines.
@@ -276,6 +299,22 @@ async def close_game(process_name: str) -> dict[str, Any]:
                     f"which is a critical system process ({why})."
                 ),
             }
+
+    # Decky 环境：若能把名字解析成 Steam appid，交给前端 TerminateApp 关闭。
+    if _frontend_launch_enabled():
+        app_id, resolved = _resolve_app_id(name)
+        if app_id is not None:
+            return {
+                "ok": True,
+                "game": resolved or name,
+                "app_id": app_id,
+                "frontend_action": {
+                    "type": "terminate_game", "app_id": app_id,
+                    "game": resolved or name,
+                },
+                "note": "已请求 Steam 内部关闭（前端 SteamClient）。",
+            }
+        # 解析不到 appid（可能是非 Steam 进程），继续走 pkill。
 
     proc = await asyncio.create_subprocess_exec(
         "pkill", "-f", name,
