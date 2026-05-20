@@ -149,21 +149,53 @@ class RuntimeInstaller:
             )
         return result.stdout
 
+    def _decky_python_version(self) -> tuple[int, int]:
+        """Decky 内置 Python 的 (major, minor)。
+
+        installer.py 在 Decky 插件后端里被加载，所以 sys.version_info 就是
+        Decky 自带的 PyInstaller Python 版本（典型为 3.11）。
+        """
+        v = sys.version_info
+        return v.major, v.minor
+
+    def _probe_python(self, candidate: str) -> tuple[int, int] | None:
+        """返回 candidate 的 (major, minor)；不存在/不可执行返回 None。"""
+        try:
+            result = subprocess.run(
+                [candidate, "-c",
+                 "import sys; print(f'{sys.version_info[0]} {sys.version_info[1]}')"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env=self._clean_env(),
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return None
+        if result.returncode != 0:
+            return None
+        try:
+            major_str, minor_str = result.stdout.strip().split()
+            return int(major_str), int(minor_str)
+        except (ValueError, IndexError):
+            return None
+
+    def _find_matching_python(self, target: tuple[int, int]) -> str | None:
+        """找一个版本号与 Decky 一致的系统 Python。"""
+        major, minor = target
+        for candidate in (
+            f"/usr/bin/python{major}.{minor}",
+            f"/usr/local/bin/python{major}.{minor}",
+            f"python{major}.{minor}",
+        ):
+            if self._probe_python(candidate) == target:
+                return candidate
+        return None
+
     def _find_system_python(self) -> str | None:
-        """找一个可用的系统 Python（能 import sys 即可，不要求 pip）。"""
+        """找任意一个可用的系统 Python（用于 pip 跨版本下载）。"""
         for candidate in ("/usr/bin/python3", "/usr/bin/python", "python3", "python"):
-            try:
-                result = subprocess.run(
-                    [candidate, "-c", "import sys; print(sys.version_info[:2])"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                    env=self._clean_env(),
-                )
-                if result.returncode == 0:
-                    return candidate
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                continue
+            if self._probe_python(candidate) is not None:
+                return candidate
         return None
 
     def _pip_install_to_vendor(
@@ -171,16 +203,36 @@ class RuntimeInstaller:
         pip_python: str,
         vendor: Path,
         req_file: Path,
+        *,
+        target_version: tuple[int, int] | None = None,
     ) -> tuple[bool, str]:
-        """用指定 Python 跑 pip install --target，返回 (ok, stderr/output)。"""
+        """用指定 Python 跑 pip install --target。
+
+        当 `target_version` 给定且与 `pip_python` 自身版本不一致时，附加
+        `--python-version` / `--abi` / `--only-binary` 让 pip 下载与目标
+        Python 兼容的 wheel —— 这是修复"系统装的是 3.13，但 Decky 是
+        3.11，pydantic_core 的 .so 不兼容"的关键。
+        """
+        cmd = [
+            pip_python, "-m", "pip", "install",
+            "--target", str(vendor),
+            "--upgrade",
+            "-r", str(req_file),
+        ]
+        if target_version is not None:
+            pip_self = self._probe_python(pip_python)
+            if pip_self != target_version:
+                major, minor = target_version
+                cmd[3:3] = [
+                    "--python-version", f"{major}.{minor}",
+                    "--platform", "manylinux2014_x86_64",
+                    "--only-binary", ":all:",
+                    "--implementation", "cp",
+                    "--abi", f"cp{major}{minor}",
+                ]
         try:
             result = subprocess.run(
-                [
-                    pip_python, "-m", "pip", "install",
-                    "--target", str(vendor),
-                    "--upgrade",
-                    "-r", str(req_file),
-                ],
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=PIP_TIMEOUT,
@@ -264,73 +316,141 @@ class RuntimeInstaller:
         return True, f"已复制 site-packages → {vendor}"
 
     def _install_python_deps(self) -> dict[str, Any]:
-        """把 requirements.txt 装到 runtime/.vendor 里。
+        """把 requirements.txt 装到 runtime/.vendor，全自动选对 wheel。
 
-        降级策略：
-        1. 直接用系统 Python 的 pip（旧 SteamOS / 其它发行版可用）
-        2. 用系统 Python 建 venv，再用 venv 的 pip（SteamOS 3.7+ PEP 668 锁了系统 pip）
-        3. 都失败：返回错误，提示用户手动执行
+        关键约束：装出来的 .so 文件必须匹配 Decky 自带 Python 的 ABI。
+        Decky 通常打包 cpython-3.11，但 SteamOS 系统 Python 可能是 3.13，
+        直接用系统 pip 装 pydantic_core 会生成 .cpython-313-*.so，
+        Decky 3.11 加载时报 `ModuleNotFoundError: No module named
+        'pydantic_core._pydantic_core'`。
 
-        失败不抛异常，返回 {ok: false, error: ...} 让 UI 显示。
+        策略（每步失败自动回退到下一步，返回结构化日志方便排错）：
+
+          A. 系统装了与 Decky 同版本的 Python（如 /usr/bin/python3.11）
+             → 用它的 pip --target，ABI 天然匹配
+          B. 没同版本，但任何系统 Python 都行 → 用 pip 的跨版本能力
+             (--python-version / --abi / --only-binary :all:) 下载匹配 wheel
+          C. 系统 pip 被 PEP 668 锁 → 在 venv 里跑同样的 pip 命令
+          D. 所有路径都失败 → 返回 ok=false + 完整 pip 输出，前端直接显示
         """
         req_file = self.runtime_dir / "requirements.txt"
         if not req_file.exists():
             return {"ok": True, "skipped": "no_requirements"}
 
         vendor = self.runtime_dir / VENDOR_DIR_NAME
-        system_python = self._find_system_python()
-        if system_python is None:
-            return {
-                "ok": False,
-                "error": "未找到系统 Python（/usr/bin/python3 不可用）",
-            }
+        decky_ver = self._decky_python_version()
+        decky_ver_str = f"{decky_ver[0]}.{decky_ver[1]}"
 
-        # 第 1 路：试系统 pip 直接装
-        ok, msg = self._pip_install_to_vendor(system_python, vendor, req_file)
-        if ok:
-            return {"ok": True, "vendor": str(vendor), "via": "system_pip"}
+        attempts: list[dict[str, Any]] = []
 
-        # 系统 pip 被 PEP 668 拦截 / 不存在 → 走 venv 兜底
-        pep668 = "externally-managed-environment" in msg or "No module named pip" in msg
-        if not pep668:
-            # 既不是 PEP 668 也不是缺 pip，可能是网络/源问题，直接抛
-            return {"ok": False, "error": f"系统 pip 安装失败:\n{msg}"}
+        def attempt(via: str, ok: bool, msg: str, extra: dict[str, Any] | None = None) -> None:
+            entry: dict[str, Any] = {"via": via, "ok": ok}
+            if msg:
+                entry["log_tail"] = msg[-2000:]  # cap log size in manifest
+            if extra:
+                entry.update(extra)
+            attempts.append(entry)
 
-        # 第 2 路：建 venv 装到 venv，然后复制到 vendor
-        venv_python, venv_log = self._ensure_venv_python(system_python)
-        if venv_python is None:
-            return {
-                "ok": False,
-                "error": f"系统 pip 不可用（PEP 668）；venv 兜底也失败：{venv_log}",
-            }
-
-        ok, msg = self._pip_install_to_vendor(venv_python, vendor, req_file)
-        if ok:
-            return {"ok": True, "vendor": str(vendor), "via": "venv", "venv_log": venv_log}
-
-        # 第 2.5 路：pip 装到 venv 自身，再 copy site-packages
-        # （某些环境 --target 会被 PEP 668 拦截，但装到 venv 默认位置可以）
-        try:
-            r = subprocess.run(
-                [venv_python, "-m", "pip", "install", "--upgrade", "-r", str(req_file)],
-                capture_output=True,
-                text=True,
-                timeout=PIP_TIMEOUT,
-                env=self._clean_env(),
+        # ---------- Strategy A: matching system Python ----------
+        matched = self._find_matching_python(decky_ver)
+        if matched:
+            ok, msg = self._pip_install_to_vendor(matched, vendor, req_file)
+            attempt(f"system_python{decky_ver_str}", ok, msg, {"python": matched})
+            if ok:
+                return {"ok": True, "vendor": str(vendor),
+                        "via": f"system_python{decky_ver_str}",
+                        "decky_python": decky_ver_str,
+                        "attempts": attempts}
+            pep668 = (
+                "externally-managed-environment" in msg
+                or "No module named pip" in msg
             )
-            if r.returncode != 0:
+            if pep668:
+                venv_python, venv_log = self._ensure_venv_python(matched)
+                if venv_python:
+                    ok, msg = self._pip_install_to_vendor(venv_python, vendor, req_file)
+                    attempt(f"venv_python{decky_ver_str}", ok, msg,
+                            {"venv_python": venv_python, "venv_log": venv_log})
+                    if ok:
+                        return {"ok": True, "vendor": str(vendor),
+                                "via": f"venv_python{decky_ver_str}",
+                                "decky_python": decky_ver_str,
+                                "venv_log": venv_log,
+                                "attempts": attempts}
+
+        # ---------- Strategy B/C: cross-version pip via any Python ----------
+        any_python = self._find_system_python()
+        if any_python is None:
+            return {
+                "ok": False,
+                "decky_python": decky_ver_str,
+                "attempts": attempts,
+                "error": (
+                    f"未找到任何系统 Python；Decky 需要 Python {decky_ver_str} 的依赖。\n"
+                    f"建议: sudo pacman -S python"
+                ),
+            }
+
+        any_ver = self._probe_python(any_python)
+        any_ver_str = f"{any_ver[0]}.{any_ver[1]}" if any_ver else "?"
+
+        # B: 直接调系统 pip + 跨版本下载
+        ok, msg = self._pip_install_to_vendor(
+            any_python, vendor, req_file, target_version=decky_ver,
+        )
+        attempt(f"cross_version_pip(host={any_ver_str},target={decky_ver_str})",
+                ok, msg, {"python": any_python})
+        if ok:
+            return {"ok": True, "vendor": str(vendor),
+                    "via": f"cross_version_pip_for_{decky_ver_str}",
+                    "host_python": any_ver_str,
+                    "decky_python": decky_ver_str,
+                    "attempts": attempts}
+
+        # C: 系统 pip 被 PEP 668 锁 → 走 venv
+        pep668 = (
+            "externally-managed-environment" in msg
+            or "No module named pip" in msg
+        )
+        if pep668:
+            venv_python, venv_log = self._ensure_venv_python(any_python)
+            if venv_python is None:
                 return {
                     "ok": False,
-                    "error": f"venv pip 安装也失败:\n{r.stderr.strip() or r.stdout.strip()}",
+                    "decky_python": decky_ver_str,
+                    "attempts": attempts,
+                    "error": f"系统 pip 被 PEP 668 锁；venv 兜底也失败：{venv_log}",
                 }
-        except subprocess.TimeoutExpired:
-            return {"ok": False, "error": f"venv pip 安装超时（{PIP_TIMEOUT}s）"}
+            ok, msg = self._pip_install_to_vendor(
+                venv_python, vendor, req_file, target_version=decky_ver,
+            )
+            attempt(f"venv_cross_version(target={decky_ver_str})", ok, msg,
+                    {"venv_python": venv_python, "venv_log": venv_log})
+            if ok:
+                return {"ok": True, "vendor": str(vendor),
+                        "via": f"venv_cross_version_for_{decky_ver_str}",
+                        "decky_python": decky_ver_str,
+                        "venv_log": venv_log,
+                        "attempts": attempts}
 
-        copied, copy_msg = self._copy_site_packages_to_vendor(venv_python, vendor)
-        if not copied:
-            return {"ok": False, "error": f"venv 装好后复制失败：{copy_msg}"}
-        return {"ok": True, "vendor": str(vendor), "via": "venv+copy", "venv_log": venv_log}
-        return {"ok": True, "vendor": str(vendor), "python": python}
+        # ---------- D: 全失败，返回完整诊断 ----------
+        return {
+            "ok": False,
+            "decky_python": decky_ver_str,
+            "vendor": str(vendor),
+            "attempts": attempts,
+            "error": (
+                f"无法为 Decky Python {decky_ver_str} 安装依赖（所有降级路径均失败）。\n"
+                f"手动修复:\n"
+                f"  python{decky_ver_str} -m pip install --target {vendor} -r {req_file}\n"
+                f"或:\n"
+                f"  python3 -m pip install --target {vendor} \\\n"
+                f"    --python-version {decky_ver_str} --platform manylinux2014_x86_64 \\\n"
+                f"    --only-binary :all: --abi cp{decky_ver[0]}{decky_ver[1]} \\\n"
+                f"    -r {req_file}\n"
+                f"最后一次 pip 输出:\n{msg}"
+            ),
+        }
 
     def install(self) -> dict[str, Any]:
         """首次安装 (git clone) 或更新 (git pull)。"""
