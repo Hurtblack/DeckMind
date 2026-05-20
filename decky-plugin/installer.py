@@ -315,12 +315,13 @@ class RuntimeInstaller:
             pip_self = self._probe_python(pip_python)
             if pip_self != target_version:
                 major, minor = target_version
+                # 只给 --python-version + --only-binary，让 pip 自行匹配兼容标记。
+                # 不要加 --abi cpXY：那会拒绝 openai 的纯 Python 依赖
+                # (certifi/idna/sniffio/anyio/h11 等是 py3-none-any，abi=none)，
+                # 导致整条 install 失败。--platform 用 host 默认（同机架构，无需指定）。
                 cmd[3:3] = [
                     "--python-version", f"{major}.{minor}",
-                    "--platform", "manylinux2014_x86_64",
                     "--only-binary", ":all:",
-                    "--implementation", "cp",
-                    "--abi", f"cp{major}{minor}",
                 ]
         try:
             result = subprocess.run(
