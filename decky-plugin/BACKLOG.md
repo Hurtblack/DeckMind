@@ -7,6 +7,31 @@
 
 ## 🔥 P0 - 必须修，否则新用户根本装不上
 
+### #0 写入/控制类 tool 不执行（只读 tool OK）
+**症状**（2026-05-20 实测）：
+- ✅ 查询电池电量 → 正常返回
+- ❌ "打开游戏 xxx" → 没反应
+- ❌ "调高音量" → 没反应
+
+**可能原因**（待排查）：
+1. 去掉 `_root` flag 后，deck 用户没权限调用某些硬件控制接口
+2. tool 内部依赖 `pynput`（macro key injection）但 SteamOS 是 Wayland 不支持
+3. 权限请求 dialog 弹出但 UI 没渲染 / 没收到（参考 runtime_client.TurnPermissionProvider）
+4. tool 实际成功但事件没回传给 UI（events 链路问题）
+
+**排查步骤**：
+- 发"打开游戏"后立刻看 `sudo journalctl -u plugin_loader --since "10 seconds ago"`
+- 看 UI 对话区有没有 `tool_start: xxx` 系统消息（说明 tool 被调起来了）
+- 看有没有 `permission_request` 事件（说明卡在权限确认）
+- 在 runtime/tools/ 下 grep "open_game" "volume" 找具体实现，看依赖了什么
+
+**修复方向**：
+- 如果是权限不足 → 用 polkit / sudoers 白名单允许 deck 用户调特定命令
+- 如果是 Wayland → 走 D-Bus 而非 pynput
+- 如果是权限对话框没渲染 → 修 UI permission flow
+
+
+
 ### #1 自动检测 Decky 的 Python 版本，用对应 wheel 装 pydantic
 **问题**：venv 用系统 Python（如 3.13），但 Decky Loader 内置 Python 是 3.11，
 pydantic_core 的 .so 是 Python 版本绑定的，不兼容会报 `ModuleNotFoundError: No module named 'pydantic_core._pydantic_core'`。
