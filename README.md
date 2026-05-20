@@ -1,6 +1,6 @@
 # steamdeck-agent
 
-> [中文 README](README.zh-CN.md)
+> [Chinese README](README.zh-CN.md)
 
 A minimal, framework-free LLM **agent runtime** for Linux / Steam Deck.
 Built to be small enough to read in one sitting — the whole loop is in
@@ -19,8 +19,8 @@ Built to be small enough to read in one sitting — the whole loop is in
             └─────────────────────────────────────────────┘
 ```
 
-- **Planner** (`runtime/planner.py`) — one call to OpenAI Responses API.
-  Returns the next `function_call` the model wants to make.
+- **Planner** (`runtime/planner.py`) — one call to the configured LLM
+  provider. Returns the next `function_call` the model wants to make.
 - **Executor** (`runtime/executor.py`) — looks the tool up in the
   registry and awaits it.
 - **Agent** (`runtime/agent.py`) — the runtime loop that wires them
@@ -129,9 +129,9 @@ uv run python main.py
 Try:
 
 ```
-you› 查看当前电量
-you› 把音量调到 30%
-you› 打开 CS2
+you › Check the current battery level
+you › Set the volume to 30%
+you › Launch CS2
 ```
 
 ### 7b. (Optional) Make it a one-word command
@@ -220,11 +220,13 @@ Set `LLM_PROVIDER` to pick the backend. Each provider needs its own API key.
 
 | Provider | `LLM_PROVIDER` | API-key env | Default model |
 |---|---|---|---|
-| OpenAI (Responses API) | `openai` *(default)* | `OPENAI_API_KEY` | `gpt-4o-mini` |
-| OpenAI (Chat Completions) | `openai-chat` | `OPENAI_API_KEY` | `gpt-4o-mini` |
+| OpenAI (Responses API) | `openai` *(default)* | `OPENAI_API_KEY` | `gpt-5.4-mini` |
+| OpenAI (Chat Completions) | `openai-chat` | `OPENAI_API_KEY` | `gpt-5.4-mini` |
+| Anthropic Claude | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` |
 | **DeepSeek** | `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-v4-flash` |
-| Moonshot (Kimi) | `moonshot` | `MOONSHOT_API_KEY` | `moonshot-v1-8k` |
-| 通义千问 (Qwen) | `qwen` | `DASHSCOPE_API_KEY` | `qwen-plus` |
+| Moonshot China (Kimi) | `moonshot` | `MOONSHOT_API_KEY` | `kimi-k2.6` |
+| Moonshot Global (Kimi) | `moonshot-global` | `MOONSHOT_API_KEY` | `kimi-k2.6` |
+| Alibaba Qwen | `qwen` | `DASHSCOPE_API_KEY` | `qwen-plus` |
 
 Override the model with `LLM_MODEL=...` if you don't want the default.
 
@@ -232,13 +234,21 @@ Override the model with `LLM_MODEL=...` if you don't want the default.
 # Example: OpenAI (default)
 export OPENAI_API_KEY=sk-...
 
+# Example: Anthropic Claude
+export LLM_PROVIDER=anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
+
 # Example: DeepSeek
 export LLM_PROVIDER=deepseek
 export DEEPSEEK_API_KEY=sk-...
 # export LLM_MODEL=deepseek-reasoner   # optional
 
-# Example: Kimi
+# Example: Kimi, China endpoint
 export LLM_PROVIDER=moonshot
+export MOONSHOT_API_KEY=sk-...
+
+# Example: Kimi, global endpoint
+export LLM_PROVIDER=moonshot-global
 export MOONSHOT_API_KEY=sk-...
 ```
 
@@ -252,7 +262,33 @@ does not change.
 uv run python main.py
 ```
 
-## Built-in tools (40 total)
+## Decky plugin panel
+
+The `decky-plugin/` package is a Decky plugin shell for installing the
+runtime and chatting with DeckMind from the Steam Deck UI.
+
+![DeckMind Decky plugin panel](frame.webp)
+
+- Provider and model selectors now cover OpenAI, OpenAI Chat, Anthropic
+  Claude, DeepSeek, Moonshot China, Moonshot Global, and Qwen.
+- Chat history is stored in browser `localStorage`, so closing the panel
+  or restarting Steam does not immediately wipe the conversation.
+- The header includes a clear-history button for resetting the panel
+  conversation.
+- Failure messages include a copy button, which is useful when pasting
+  install or runtime errors into an issue.
+
+For the full two-page visual preview, see
+[decky-plugin/slides.pdf](decky-plugin/slides.pdf).
+
+Build the panel bundle from `decky-plugin/`:
+
+```bash
+npm install
+npm run build
+```
+
+## Built-in tools (41 total)
 
 | Group | Tools | Risk |
 |---|---|---|
@@ -268,6 +304,7 @@ uv run python main.py
 | Macro | `press_key`, `start_key_loop`, `stop_all_macros` | side-effect |
 | Files / diagnostics | `find_files`, `list_processes`, `read_text_file` | safe |
 | Files / diagnostics | `write_text_file`, `run_command` | **destructive (2-step confirm)** |
+| Decky plugin | `install_decky_plugin` | **destructive (2-step confirm)** |
 | **Profile** | `remember`, `forget`, `list_profile` | safe |
 | **Self-update** | `check_for_updates` | safe |
 | **Self-update** | `apply_update` | **destructive (2-step confirm)** |
@@ -368,13 +405,13 @@ auto-injected into the system prompt at every startup, so the agent
 already "knows you" before the first message.
 
 ```text
-you › 记住我叫 hurtblack，喜欢魂系游戏，周末才有时间玩
-deckmind › 好的，记下来啦。
+you › Remember that my name is hurtblack, I like Soulslikes, and I only play on weekends.
+deckmind › Got it. I saved that to your profile.
 
 [exit, reopen, even reboot]
 
-you › 推荐一个我现在能玩的
-deckmind › 看你喜欢魂系，加上时间紧 — 试试 Sekiro，单局节奏快。
+you › Recommend something I can play right now.
+deckmind › Since you like Soulslikes and have limited time, try Sekiro for a focused session.
 ```
 
 You can also hand-edit `~/.deckmind/profile.json` — it's plain JSON.
@@ -384,13 +421,13 @@ You can also hand-edit `~/.deckmind/profile.json` — it's plain JSON.
 The agent can pull its own latest commits from GitHub:
 
 ```
-you › 检查更新           → calls check_for_updates (read-only)
-deckmind › 落后 3 个提交，新内容：...
+you › Check for updates        -> calls check_for_updates (read-only)
+deckmind › You are 3 commits behind. Recent changes: ...
 
-you › 拉一下             → calls apply_update(confirm=false)
-deckmind › 预览：从 abc → def，3 个提交。要执行吗？
-you › 确认
-deckmind › ✓ pulled + uv synced. 退出后重启 agent 加载新代码。
+you › Pull the update          -> calls apply_update(confirm=false)
+deckmind › Preview: abc -> def, 3 commits. Apply it?
+you › Confirm
+deckmind › Updated with git pull and uv sync. Restart the agent to load the new code.
 ```
 
 Safety constraints:
@@ -418,8 +455,8 @@ Log play sessions to your Notion database. Three steps to set up:
 3. **Share a database** with the integration in Notion (database
    page → `⋯` → Connections → search "DeckMind" → add).
 
-That's it — **no `NOTION_DATABASE_ID` needed**. When you say "绑定
-notion" / "connect notion", `notion_status` auto-discovers:
+That's it — **no `NOTION_DATABASE_ID` needed**. When you say
+"connect notion", `notion_status` auto-discovers:
 
 - **1 shared database** → silently picks it, persisted to
   `~/.deckmind/notion.json`.
@@ -432,22 +469,21 @@ least a Title, a Number, a Date (and optionally a Rich Text field for
 notes) works.
 
 ```
-you › 记一笔我刚玩了 1 小时 Hades
-deckmind › ✓ 已记录：Hades · 60 分钟 · 今天
+you › Log that I just played Hades for 1 hour.
+deckmind › Logged: Hades, 60 minutes, today.
 
-you › 这周玩了多久
-deckmind › 本周共 8.5 小时。排行：Hades 4h、Stardew 2h、CS2 1.5h。
+you › How much did I play this week?
+deckmind › 8.5 hours this week. Top games: Hades 4h, Stardew 2h, CS2 1.5h.
 ```
 
 ## What you see at runtime (UI)
 
 ```
-you ›                  ← cyan, bold (your input)
-deckmind ›             ← green, bold (agent reply, streamed token-by-token)
-  · tool_name…         ← dim yellow (quiet mode tool indicator)
-  ! refused: ...       ← dim red (only on errors/refusals)
-  ↳ 耗时 1.8s  ·  本轮 提示 9,810 + 回复 192 tokens  ·  累计 ...  ·  模型 deepseek-chat
-                       ← dim grey (footer, every reply)
+you ›                  <- cyan, bold (your input)
+deckmind ›             <- green, bold (agent reply, streamed token-by-token)
+  · tool_name...       <- dim yellow (quiet mode tool indicator)
+  ! refused: ...       <- dim red (only on errors/refusals)
+  footer line          <- dim grey: elapsed time, turn tokens, session totals, model
 ```
 
 - **Streaming**: text appears character-by-character as the model
@@ -462,65 +498,56 @@ deckmind ›             ← green, bold (agent reply, streamed token-by-token)
 ## Example session
 
 ```text
-you> 查看当前电量
-  ▸ tool: get_battery({})
-    ↳ {'ok': True, 'device': 'BAT1', 'percent': 78, 'status': 'Discharging'}
-bot> Battery: 78% (discharging).
+SteamDeckAgent — type a request, `/model <model>`, `/api <provider> [model]`, or `exit` to quit.
+[openai · gpt-5.4-mini · quiet]
 
-you> 把音量调到 50%
-  ▸ tool: set_volume({'percent': 50})
-    ↳ {'ok': True, 'percent': 50, 'backend': 'wpctl'}
-bot> Volume set to 50%.
+you › Check the current battery level.
+  · get_battery...
+deckmind › Battery is at 78% and discharging.
+  footer: 1.2s, turn tokens, session totals, model gpt-5.4-mini
 
-you> Clash Verge 下载好了，帮我解压并启动
-  ▸ tool: find_files({'query': 'Clash.Verge', 'roots': ['~/Downloads']})
-    ↳ {'ok': True, 'matches': ['~/Downloads/Clash.Verge_x64.app.tar.gz']}
-  ▸ tool: run_command({'argv': ['tar', '-xzf', '~/Downloads/Clash.Verge_x64.app.tar.gz', '-C', '~/Downloads'], 'confirm': False})
-    ↳ {'ok': True, 'dry_run': True, 'command': 'tar', 'output_path': '/home/deck/Downloads'}
-bot> I found the archive and inspected it. Extract it to Downloads?
+you › Set the volume to 50%.
+Approve side-effect tool `set_volume`? [y/n/a] y
+  · set_volume...
+deckmind › Volume is now set to 50%.
+  footer: 0.9s, turn tokens, session totals, model gpt-5.4-mini
 
-you> 确认
-  ▸ tool: run_command({'argv': ['tar', '-xzf', '~/Downloads/Clash.Verge_x64.app.tar.gz', '-C', '~/Downloads'], 'confirm': True})
-    ↳ {'ok': True, 'command': 'tar', 'returncode': 0}
-  ▸ tool: find_files({'query': 'clash-verge', 'roots': ['~/Downloads']})
-    ↳ {'ok': True, 'matches': ['~/Downloads/Clash Verge/clash-verge']}
-  ▸ tool: run_command({'argv': ['chmod', '+x', '~/Downloads/Clash Verge/clash-verge'], 'confirm': False})
-    ↳ {'ok': True, 'dry_run': True, 'command': 'chmod'}
-bot> The executable is `~/Downloads/Clash Verge/clash-verge`. Make it executable and launch it?
+you › Find the Clash Verge archive in Downloads, extract it, and launch it.
+  · find_files...
+  · run_command...
+deckmind › I found `~/Downloads/Clash.Verge_x64.app.tar.gz`. Extract it to `~/Downloads`?
 
-you> 可以
-  ▸ tool: run_command({'argv': ['chmod', '+x', '~/Downloads/Clash Verge/clash-verge'], 'confirm': True})
-    ↳ {'ok': True, 'command': 'chmod', 'returncode': 0}
-  ▸ tool: run_command({'argv': ['launch_file', '~/Downloads/Clash Verge/clash-verge'], 'confirm': False})
-    ↳ {'ok': True, 'dry_run': True, 'command': 'launch_file'}
-  ▸ tool: run_command({'argv': ['launch_file', '~/Downloads/Clash Verge/clash-verge'], 'confirm': True})
-    ↳ {'ok': True, 'command': 'launch_file', 'pid': 12345}
-bot> Clash Verge has been launched.
+you › Confirm.
+Approve destructive tool `run_command`? [y/n/a] y
+  · run_command...
+  · find_files...
+  · run_command...
+deckmind › The executable is `~/Downloads/Clash Verge/clash-verge`. Make it executable and launch it?
 
-you> 帮我看一下 Clash 进程在不在
-  ▸ tool: run_command({'argv': ['pgrep', '-a', 'clash'], 'advanced': True, 'confirm': False})
-    ↳ {'ok': True, 'dry_run': True, 'advanced': True, 'risk_level': 'high',
-       'requires_high_risk_confirm': True}
-bot> This needs high-risk approval because it is outside the normal command allowlist. Run `pgrep -a clash`?
+you › Yes.
+Approve destructive tool `run_command`? [y/n/a] y
+  · run_command...
+  · run_command...
+deckmind › Clash Verge has been launched.
 
-you> 确认
-  ▸ tool: run_command({'argv': ['pgrep', '-a', 'clash'], 'advanced': True, 'confirm': True, 'high_risk_confirm': True})
-    ↳ {'ok': True, 'command': 'pgrep', 'stdout_tail': '12345 clash-verge\n'}
-bot> Clash is running: PID 12345, command `clash-verge`.
+you › Is the Clash process running?
+  · run_command...
+deckmind › This command needs high-risk approval because it is outside the normal allowlist. Run `pgrep -a clash`?
 
-you> 帮我卸载 Dolphin 模拟器
-  ▸ tool: list_flatpak_apps({})
-    ↳ {'ok': True, 'count': 23, 'apps': [...,
-         {'app_id': 'org.DolphinEmu.dolphin-emu', 'name': 'Dolphin', 'size': '412 MB'}]}
-  ▸ tool: uninstall_flatpak({'app_id': 'org.DolphinEmu.dolphin-emu', 'confirm': False})
-    ↳ {'ok': True, 'dry_run': True, 'app_id': 'org.DolphinEmu.dolphin-emu',
-       'size': '412 MB', 'message': 'Will uninstall ... Ask the user to confirm...'}
-bot> 找到了 Dolphin (412 MB)。确认卸载吗？
+you › Confirm.
+Approve destructive tool `run_command`? [y/n/a] y
+  · run_command...
+deckmind › Clash is running: PID 12345, command `clash-verge`.
 
-you> 确认
-  ▸ tool: uninstall_flatpak({'app_id': 'org.DolphinEmu.dolphin-emu', 'confirm': True})
-    ↳ {'ok': True, 'uninstalled': 'org.DolphinEmu.dolphin-emu', ...}
-bot> 已卸载 Dolphin，释放约 412 MB。
+you › Uninstall the Dolphin emulator.
+  · list_flatpak_apps...
+  · uninstall_flatpak...
+deckmind › I found Dolphin (412 MB). Confirm uninstall?
+
+you › Confirm.
+Approve destructive tool `uninstall_flatpak`? [y/n/a] y
+  · uninstall_flatpak...
+deckmind › Dolphin has been uninstalled and about 412 MB was freed.
 ```
 
 ## Notes & limitations
