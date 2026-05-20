@@ -84,26 +84,63 @@ async def launch_game(game_name: str) -> dict[str, Any]:
         return {"ok": True, "mock": True, "game": key, "app_id": app_id,
                 "note": "steam binary not found; pretending to launch"}
 
-    # Fire-and-forget: don't block on the game process.
+    # Snapshot before launch so we can tell the launch *caused* the
+    # process to appear, not just observe that Steam was already running.
+    steam_was_running = await _steam_running()
+    existing_pids = set(await _processes_for_appid(app_id))
+
     proc = await asyncio.create_subprocess_exec(
         "steam", f"steam://rungameid/{app_id}",
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
         env=_session_env(),
     )
-    rc = await proc.wait()
-    # `steam` URI handler exits 0 quickly after handing off to the
-    # running Steam client. If Steam isn't running and we couldn't reach
-    # the session bus, it exits 0 too — but no Steam process exists.
-    # A short delay + pgrep catches the silent-failure case.
-    await asyncio.sleep(0.4)
-    steam_alive = await _steam_running()
-    if not steam_alive:
+    await proc.wait()
+
+    # Real verification: Steam wraps every game launch with
+    # `reaper SteamLaunch AppId=<id> ...`. Polling for that string in
+    # any process's argv is the reliable signal — it differentiates
+    # "this game was launched" from "Steam is just running" and works
+    # for Proton, native, and Flatpak games.
+    new_pids = await _wait_for_appid_process(app_id, existing_pids, timeout=5.0)
+    if new_pids:
+        return {
+            "ok": True,
+            "game": key,
+            "app_id": app_id,
+            "pid": proc.pid,
+            "game_pids": new_pids,
+            "steam_was_running": steam_was_running,
+            "verified_by": "appid_process",
+        }
+
+    steam_running_now = await _steam_running()
+
+    # Steam wasn't running before and is now starting — the URI was
+    # accepted, the game will follow once Steam finishes loading. We
+    # can't block long enough to confirm, so call it a tentative success.
+    if not steam_was_running and steam_running_now:
+        return {
+            "ok": True,
+            "game": key,
+            "app_id": app_id,
+            "pid": proc.pid,
+            "steam_was_running": False,
+            "verified_by": "steam_cold_start",
+            "note": (
+                "Steam wasn't running and is now starting; the game will "
+                "launch once Steam finishes loading (not yet visible in ps)."
+            ),
+        }
+
+    # Steam never appeared — the URI was sent but nothing happened.
+    # Most common cause: this backend cannot reach the user DBus
+    # session, so `steam` exits 0 but the URL is dropped.
+    if not steam_running_now:
         return {
             "ok": False,
             "game": key,
             "app_id": app_id,
-            "returncode": rc,
             "error": (
                 "issued steam:// URI but no Steam process is running — "
                 "Steam Client may not be launched, or this backend cannot "
@@ -111,8 +148,23 @@ async def launch_game(game_name: str) -> dict[str, Any]:
                 "DBUS_SESSION_BUS_ADDRESS)."
             ),
         }
-    return {"ok": True, "game": key, "app_id": app_id, "pid": proc.pid,
-            "steam_running": True}
+
+    # Steam was already running, accepted the URL, but no AppId-tagged
+    # process appeared within the poll window. Game either failed to
+    # start, is still loading, or the URI was silently dropped.
+    return {
+        "ok": False,
+        "game": key,
+        "app_id": app_id,
+        "steam_was_running": True,
+        "error": (
+            f"Steam is running and accepted the steam:// URI but no "
+            f"process tagged with AppId={app_id} appeared within 5s. "
+            f"Likely causes: game still loading (check Steam UI), game "
+            f"failed to start (check Steam logs), or the URL was dropped "
+            f"because session DBus is unreachable."
+        ),
+    }
 
 
 async def _steam_running() -> bool:
@@ -127,6 +179,54 @@ async def _steam_running() -> bool:
     )
     rc = await proc.wait()
     return rc == 0
+
+
+async def _processes_for_appid(app_id: str) -> list[int]:
+    """PIDs whose argv mentions `AppId=<app_id>` — Steam's launch wrapper.
+
+    Steam (both regular and Game Mode) launches every game via
+    `reaper SteamLaunch AppId=<id> -- ...`. Grepping for that tag is
+    a strong signal that THIS game is actually running, not just that
+    the Steam client is open.
+    """
+    if not shutil.which("pgrep"):
+        return []
+    proc = await asyncio.create_subprocess_exec(
+        "pgrep", "-af", f"AppId={app_id}",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+        env=_session_env(),
+    )
+    out, _ = await proc.communicate()
+    pids: list[int] = []
+    for line in out.decode(errors="ignore").splitlines():
+        head = line.split(None, 1)[0] if line.strip() else ""
+        if head.isdigit():
+            pids.append(int(head))
+    return pids
+
+
+async def _wait_for_appid_process(
+    app_id: str,
+    existing_pids: set[int],
+    timeout: float,
+) -> list[int]:
+    """Poll until a new AppId-tagged process appears, or timeout.
+
+    Returns the list of NEW pids (excluding any that were already
+    present before the launch — that's how we distinguish "the launch
+    started something" from "this game was already running").
+    """
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + timeout
+    while True:
+        pids = await _processes_for_appid(app_id)
+        fresh = [p for p in pids if p not in existing_pids]
+        if fresh:
+            return fresh
+        if loop.time() >= deadline:
+            return []
+        await asyncio.sleep(0.3)
 
 
 # Processes whose death would break the running system in ways the user
