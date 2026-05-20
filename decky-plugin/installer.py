@@ -678,29 +678,50 @@ class RuntimeInstaller:
                       "package-lock.json", ".gitignore"}
 
         copied: list[str] = []
-        try:
-            for root, dirs, files in os.walk(src):
-                dirs[:] = [d for d in dirs if d not in skip_dirs]
-                rel = Path(root).relative_to(src)
-                target_dir = dst / rel
+        failed: list[str] = []
+        for root, dirs, files in os.walk(src):
+            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            rel = Path(root).relative_to(src)
+            target_dir = dst / rel
+            try:
                 target_dir.mkdir(parents=True, exist_ok=True)
-                for name in files:
-                    if name in skip_files:
-                        continue
-                    shutil.copy2(Path(root) / name, target_dir / name)
-                    copied.append(str((rel / name)))
-        except OSError as e:
-            return {"ok": False, "error": f"同步 plugin 失败: {e}",
-                    "copied": copied}
+            except OSError as e:
+                failed.append(f"{rel}/ ({e})")
+                continue
+            for name in files:
+                if name in skip_files:
+                    continue
+                target = target_dir / name
+                try:
+                    # 先删旧文件再写：只要目录归 deck，就能替换掉残留的
+                    # root 属主文件（Linux 删除看目录写权限，不看文件本身）。
+                    if target.exists() or target.is_symlink():
+                        target.unlink()
+                    shutil.copy2(Path(root) / name, target)
+                    copied.append(str(rel / name))
+                except OSError as e:
+                    failed.append(f"{rel / name} ({e})")
 
+        if failed and not copied:
+            return {
+                "ok": False,
+                "error": "同步 plugin 失败（权限？）。"
+                         "请在 Konsole 跑 sudo chown -R deck:deck "
+                         f"{dst}",
+                "failed": failed[:10],
+            }
+
+        note = "plugin 已更新，需在 Decky 重载插件 / 重启 Steam 生效"
+        if failed:
+            note += f"（{len(failed)} 个文件因权限跳过，可 sudo chown -R deck:deck {dst}）"
         self._emit("plugin", "ok",
-                   f"已同步 plugin 本体（{len(copied)} 个文件），"
-                   f"请在 Decky 重载插件或重启 Steam 生效")
+                   f"已同步 plugin 本体（{len(copied)} 个文件）。{note}")
         return {
             "ok": True,
             "plugin_dir": str(dst),
             "files": len(copied),
-            "note": "plugin 已更新，需在 Decky 重载插件 / 重启 Steam 生效",
+            "failed": failed[:10] if failed else [],
+            "note": note,
         }
 
     async def install_async(self) -> dict[str, Any]:
