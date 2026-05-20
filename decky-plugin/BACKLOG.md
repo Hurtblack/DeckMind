@@ -130,13 +130,10 @@ pydantic_core 的 .so 是 Python 版本绑定的，不兼容会报 `ModuleNotFou
 
 ## 💡 P2 - 体验优化（不影响功能）
 
-### #8 install_runtime 没有进度反馈，用户不知道是卡了还是在跑
-**问题**：git clone 几秒到几十秒；pip install 30-60 秒。UI 只显示"开始下载并安装 Runtime..."然后干等。
-
-**修复方案**：
-- 后端开 SSE / WebSocket 推 stage：`cloning → cloned → installing_deps → success`
-- 或者：UI 轮询 `/install_status` RPC，返回当前阶段 + 进度
-- 简单方案：每个阶段往 events 列表写一条，turn 风格的 polling
+### ~~#8 install_runtime 没有进度反馈~~ ✅ 已修 (commit `1565398`)
+后端 events buffer + `get_install_progress(since)` RPC + UI 500ms 轮询。
+每个阶段（git / deps.A/B/C / manifest）实时显示在聊天区，五种图标
+（▶/·/✓/✗/—）标记状态，失败时直接看到卡在哪一步及 pip 完整输出。
 
 ---
 
@@ -213,12 +210,17 @@ curl -sSL https://raw.githubusercontent.com/Hurtblack/DeckMind/main/scripts/fix-
 | `8750e32` | _clean_env 剥离 PyInstaller LD_LIBRARY_PATH |
 | `f5f3bfa` | install_runtime 后自动 pip install 到 .vendor |
 | `5b87f0c` | SteamOS PEP 668：自动 venv 兜底 |
+| `2d58280` | #0 注入用户 session env + write 操作 read-back 校验 |
+| `3942548` | run_command 只读命令免确认 |
+| `f588d4c` | #1 installer 自动匹配 Decky Python 版本装对应 wheel |
+| `bf3860c` | launch_game 按 AppId 验证真的起来，不再只看 Steam Client |
+| `cc350c8` | session_env 优先读 Decky 注入的 DECKY_USER |
+| `1565398` | #8 安装阶段实时流式输出到聊天界面 |
 
 ---
 
 ## 后续动作建议
 
-1. **立即做 #1**（pydantic 版本不匹配自动修复）- 不做新用户必踩
-2. **做 #16 兜底脚本** - 万一自动化失败有救
-3. **写 #13 文档** - 让用户知道踩到哪个坑、怎么自救
-4. P2 的能做就做，做不了不影响新用户跑通
+1. **做 #16 兜底脚本** - 万一自动化失败有救
+2. **写 #13 文档** - 让用户知道踩到哪个坑、怎么自救
+3. P2 的能做就做，做不了不影响新用户跑通
