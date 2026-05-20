@@ -198,12 +198,16 @@ function messageStyle(role: Message["role"]) {
 function StatusBar({
   busy,
   config,
+  configOpen,
   onRefresh,
+  onToggleConfig,
   status,
 }: {
   busy: boolean;
   config: RuntimeConfig | null;
+  configOpen: boolean;
   onRefresh: () => void;
+  onToggleConfig: () => void;
   status: RuntimeStatus | null;
 }) {
   const installed = status?.installed === true;
@@ -261,9 +265,33 @@ function StatusBar({
         {installed ? <FaCheckCircle size={11} /> : <FaExclamationTriangle size={11} />}
         {runtimeLabel}
       </div>
-      <div style={badgeStyle(hasApiKey)}>
+      <div
+        style={{ ...badgeStyle(hasApiKey), cursor: busy ? "default" : "pointer" }}
+        onClick={(event) => {
+          // Don't trigger the parent's onRefresh.
+          event.stopPropagation();
+          if (!busy) {
+            onToggleConfig();
+          }
+        }}
+        onKeyDown={(event) => {
+          if (!busy && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault();
+            event.stopPropagation();
+            onToggleConfig();
+          }
+        }}
+        role="button"
+        tabIndex={0}
+        aria-pressed={configOpen}
+        aria-label={hasApiKey ? "切换 provider / 模型 / API key" : "配置 provider 和 API key"}
+        title={hasApiKey ? "点击切换 provider 或更换 API key" : "点击配置 API key"}
+      >
         <FaKey size={11} />
         {hasApiKey ? config?.provider ?? "API" : "未配置"}
+        <span style={{ opacity: 0.6, fontSize: 9, marginLeft: 2 }}>
+          {configOpen ? "▴" : "▾"}
+        </span>
       </div>
     </div>
   );
@@ -334,10 +362,12 @@ function ConfigCard({
   busy,
   config,
   onSaved,
+  onApiKeySaved,
 }: {
   busy: boolean;
   config: RuntimeConfig | null;
   onSaved: (config: RuntimeConfig) => void;
+  onApiKeySaved?: () => void;
 }) {
   const [provider, setProvider] = useState(config?.provider ?? "openai");
   const [model, setModel] = useState(config?.model ?? "");
@@ -386,6 +416,7 @@ function ConfigCard({
     const saved = await saveConfig({ provider, model, api_key: apiKey });
     setApiKey("");
     onSaved(saved);
+    onApiKeySaved?.();
   };
 
   return (
@@ -484,6 +515,7 @@ function Content() {
   const seenEventCountRef = useRef(0);
   const [pollVersion, setPollVersion] = useState(0);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [configOpen, setConfigOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const appendMessage = (role: Message["role"], text: string) => {
@@ -709,7 +741,9 @@ function Content() {
       <StatusBar
         busy={busy}
         config={config}
+        configOpen={configOpen}
         onRefresh={() => void refresh()}
+        onToggleConfig={() => setConfigOpen((open) => !open)}
         status={status}
       />
 
@@ -722,14 +756,17 @@ function Content() {
         />
       )}
 
-      <ConfigCard
-        busy={busy}
-        config={config}
-        onSaved={(saved) => {
-          setConfig(saved);
-          appendMessage("system", "配置已保存");
-        }}
-      />
+      {(!config?.has_api_key || configOpen) && (
+        <ConfigCard
+          busy={busy}
+          config={config}
+          onSaved={(saved) => {
+            setConfig(saved);
+            appendMessage("system", "配置已保存");
+          }}
+          onApiKeySaved={() => setConfigOpen(false)}
+        />
+      )}
 
       {permissionRequest && (
         <PanelSection title="需要确认">
