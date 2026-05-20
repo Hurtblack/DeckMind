@@ -567,6 +567,14 @@ def _launch_env() -> dict[str, str]:
         value = os.environ.get(key)
         if value:
             env[key] = value
+    # Fall back to reconstructed user-session vars (DBus/Wayland/XDG)
+    # when the host process didn't inherit them — e.g. running under
+    # Decky's plugin_loader.service.
+    from runtime.session_env import session_env
+    filled = session_env(env)
+    for key in _LAUNCH_ENV_KEYS:
+        if key not in env and key in filled:
+            env[key] = filled[key]
     return env
 
 

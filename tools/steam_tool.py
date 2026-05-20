@@ -9,8 +9,14 @@ run on a developer machine as well.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import shutil
 from typing import Any
+
+
+def _session_env() -> dict[str, str]:
+    # Lazy import to avoid runtime/__init__.py circular load.
+    return importlib.import_module("runtime.session_env").session_env()
 
 # A small mock registry so the demo works even without a real Steam install.
 # Map a human-friendly name -> Steam AppID.
@@ -83,8 +89,44 @@ async def launch_game(game_name: str) -> dict[str, Any]:
         "steam", f"steam://rungameid/{app_id}",
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
+        env=_session_env(),
     )
-    return {"ok": True, "game": key, "app_id": app_id, "pid": proc.pid}
+    rc = await proc.wait()
+    # `steam` URI handler exits 0 quickly after handing off to the
+    # running Steam client. If Steam isn't running and we couldn't reach
+    # the session bus, it exits 0 too — but no Steam process exists.
+    # A short delay + pgrep catches the silent-failure case.
+    await asyncio.sleep(0.4)
+    steam_alive = await _steam_running()
+    if not steam_alive:
+        return {
+            "ok": False,
+            "game": key,
+            "app_id": app_id,
+            "returncode": rc,
+            "error": (
+                "issued steam:// URI but no Steam process is running — "
+                "Steam Client may not be launched, or this backend cannot "
+                "reach the user DBus session (check XDG_RUNTIME_DIR / "
+                "DBUS_SESSION_BUS_ADDRESS)."
+            ),
+        }
+    return {"ok": True, "game": key, "app_id": app_id, "pid": proc.pid,
+            "steam_running": True}
+
+
+async def _steam_running() -> bool:
+    """True if a steam client process is alive in this session."""
+    if not shutil.which("pgrep"):
+        return True  # can't tell — assume success and don't false-alarm
+    proc = await asyncio.create_subprocess_exec(
+        "pgrep", "-x", "steam",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+        env=_session_env(),
+    )
+    rc = await proc.wait()
+    return rc == 0
 
 
 # Processes whose death would break the running system in ways the user
@@ -139,6 +181,7 @@ async def close_game(process_name: str) -> dict[str, Any]:
         "pkill", "-f", name,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=_session_env(),
     )
     await proc.communicate()
     # pkill exits 0 if it killed something, 1 if nothing matched.
@@ -177,7 +220,14 @@ async def install_game(game_name: str, confirm: bool = False) -> dict[str, Any]:
         "steam", f"steam://install/{app_id}",
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
+        env=_session_env(),
     )
+    await proc.wait()
+    await asyncio.sleep(0.4)
+    if not await _steam_running():
+        return {"ok": False, "game": key, "app_id": app_id,
+                "error": "steam:// URI sent but no Steam process is running "
+                         "(see launch_game for likely DBus session cause)."}
     return {"ok": True, "game": key, "app_id": app_id, "pid": proc.pid,
             "note": "Steam install dialog opened — user must click Install there."}
 
@@ -207,7 +257,14 @@ async def uninstall_game(game_name: str, confirm: bool = False) -> dict[str, Any
         "steam", f"steam://uninstall/{app_id}",
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
+        env=_session_env(),
     )
+    await proc.wait()
+    await asyncio.sleep(0.4)
+    if not await _steam_running():
+        return {"ok": False, "game": key, "app_id": app_id,
+                "error": "steam:// URI sent but no Steam process is running "
+                         "(see launch_game for likely DBus session cause)."}
     return {"ok": True, "game": key, "app_id": app_id, "pid": proc.pid,
             "note": "Steam uninstall dialog opened — user must confirm in Steam."}
 
