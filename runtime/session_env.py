@@ -32,9 +32,22 @@ _SESSION_ENV_KEYS: tuple[str, ...] = (
 
 
 def _resolve_uid() -> int | None:
-    name = os.environ.get("DECKMIND_TARGET_USER", _DEFAULT_TARGET_USER)
+    # Priority order:
+    #   1. DECKMIND_TARGET_USER — explicit override
+    #   2. DECKY_USER — Decky Loader injects this into plugin backends
+    #      (per https://docs.decky.xyz). Authoritative on Steam Deck even
+    #      if `deck` isn't the desktop user (custom usernames, dev setups).
+    #   3. `deck` — SteamOS default
+    for env_key in ("DECKMIND_TARGET_USER", "DECKY_USER"):
+        name = os.environ.get(env_key)
+        if name:
+            try:
+                return pwd.getpwnam(name).pw_uid
+            except KeyError:
+                pass
+
     try:
-        return pwd.getpwnam(name).pw_uid
+        return pwd.getpwnam(_DEFAULT_TARGET_USER).pw_uid
     except KeyError:
         pass
 
