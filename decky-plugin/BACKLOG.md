@@ -7,28 +7,48 @@
 
 ## 🔥 P0 - 必须修，否则新用户根本装不上
 
-### #0 写入/控制类 tool 不执行（只读 tool OK）
+### #0 写入/控制类 tool "假成功"（CLI 跑同代码 OK）
 **症状**（2026-05-20 实测）：
-- ✅ 查询电池电量 → 正常返回
-- ❌ "打开游戏 xxx" → 没反应
-- ❌ "调高音量" → 没反应
+- ✅ 查询电池电量 → 正常返回（读 `/sys/class/power_supply/`，纯文件 IO）
+- ❌ "打开游戏 xxx" → UI 显示成功，Steam 没反应
+- ❌ "调高音量" → UI 显示成功，音量没变
+- ✅ **同样的 runtime 在 Konsole 里 `python3 main.py` 跑，全部正常**
 
-**可能原因**（待排查）：
-1. 去掉 `_root` flag 后，deck 用户没权限调用某些硬件控制接口
-2. tool 内部依赖 `pynput`（macro key injection）但 SteamOS 是 Wayland 不支持
-3. 权限请求 dialog 弹出但 UI 没渲染 / 没收到（参考 runtime_client.TurnPermissionProvider）
-4. tool 实际成功但事件没回传给 UI（events 链路问题）
+**根本原因**：plugin 后端是 `plugin_loader.service` 这个 systemd 服务启动的，
+没继承用户登录时的图形会话环境。subprocess 调 steam/pactl/wpctl 时
+`DBUS_SESSION_BUS_ADDRESS` / `WAYLAND_DISPLAY` / `XDG_RUNTIME_DIR` 都没设，
+命令 exit 0 但 DBus 调用沉默失败 → 后端拿到 returncode=0 误以为成功。
 
 **排查步骤**：
-- 发"打开游戏"后立刻看 `sudo journalctl -u plugin_loader --since "10 seconds ago"`
-- 看 UI 对话区有没有 `tool_start: xxx` 系统消息（说明 tool 被调起来了）
-- 看有没有 `permission_request` 事件（说明卡在权限确认）
-- 在 runtime/tools/ 下 grep "open_game" "volume" 找具体实现，看依赖了什么
+```bash
+# 1. 看 plugin 后端实际拿到的环境变量
+sudo cat /proc/$(pgrep -f 'plugins/DeckMind' | head -1)/environ | tr '\0' '\n' | grep -iE 'DBUS|DISPLAY|XDG'
 
-**修复方向**：
-- 如果是权限不足 → 用 polkit / sudoers 白名单允许 deck 用户调特定命令
-- 如果是 Wayland → 走 D-Bus 而非 pynput
-- 如果是权限对话框没渲染 → 修 UI permission flow
+# 2. 对比 Konsole 里 (deck 用户登录会话)
+env | grep -iE 'DBUS|DISPLAY|XDG'
+```
+两者差异基本就是问题所在。
+
+**修复方向**（按推荐度排序）：
+1. **借用 deck 用户的 session bus**：tool 执行前，注入 `XDG_RUNTIME_DIR=/run/user/1000`
+   和 `DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus`（uid=1000 是 deck 默认）
+2. **subprocess 真正校验执行效果**：调音量后 read back 验证，而非只看 returncode
+3. **对 Steam 用 IPC 文件**：写 `~/.steam/steam/steam.pipe` 触发命令，绕开 DBus
+4. **D-Bus 调 systemd --user**：用 `systemctl --user --machine=deck@.host` 套娃执行
+5. **走 Decky 提供的 API**：Decky 本身可能有跨进程调用 Steam 的能力，调研
+
+**实现：tool 执行前自动 patch 环境**
+在 runtime/executor.py 或 tool 实现里加：
+```python
+def _user_session_env():
+    env = os.environ.copy()
+    env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{os.getuid()}/bus")
+    env.setdefault("DISPLAY", ":0")  # Game Mode 可能没 X，但桌面模式有
+    env.setdefault("WAYLAND_DISPLAY", "wayland-0")
+    return env
+subprocess.run(cmd, env=_user_session_env(), ...)
+```
 
 
 
