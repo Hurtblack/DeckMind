@@ -81,7 +81,9 @@ function IconBase(props) {
 }
 
 // THIS FILE IS AUTO GENERATED
-function FaTerminal (props) {
+function FaTrash (props) {
+  return GenIcon({"attr":{"viewBox":"0 0 448 512"},"child":[{"tag":"path","attr":{"d":"M432 32H312l-9.4-18.7A24 24 0 0 0 281.1 0H166.8a23.72 23.72 0 0 0-21.4 13.3L136 32H16A16 16 0 0 0 0 48v32a16 16 0 0 0 16 16h416a16 16 0 0 0 16-16V48a16 16 0 0 0-16-16zM53.2 467a48 48 0 0 0 47.9 45h245.8a48 48 0 0 0 47.9-45L416 128H32z"},"child":[]}]})(props);
+}function FaTerminal (props) {
   return GenIcon({"attr":{"viewBox":"0 0 640 512"},"child":[{"tag":"path","attr":{"d":"M257.981 272.971L63.638 467.314c-9.373 9.373-24.569 9.373-33.941 0L7.029 444.647c-9.357-9.357-9.375-24.522-.04-33.901L161.011 256 6.99 101.255c-9.335-9.379-9.317-24.544.04-33.901l22.667-22.667c9.373-9.373 24.569-9.373 33.941 0L257.981 239.03c9.373 9.372 9.373 24.568 0 33.941zM640 456v-32c0-13.255-10.745-24-24-24H312c-13.255 0-24 10.745-24 24v32c0 13.255 10.745 24 24 24h304c13.255 0 24-10.745 24-24z"},"child":[]}]})(props);
 }function FaSync (props) {
   return GenIcon({"attr":{"viewBox":"0 0 512 512"},"child":[{"tag":"path","attr":{"d":"M440.65 12.57l4 82.77A247.16 247.16 0 0 0 255.83 8C134.73 8 33.91 94.92 12.29 209.82A12 12 0 0 0 24.09 224h49.05a12 12 0 0 0 11.67-9.26 175.91 175.91 0 0 1 317-56.94l-101.46-4.86a12 12 0 0 0-12.57 12v47.41a12 12 0 0 0 12 12H500a12 12 0 0 0 12-12V12a12 12 0 0 0-12-12h-47.37a12 12 0 0 0-11.98 12.57zM255.83 432a175.61 175.61 0 0 1-146-77.8l101.8 4.87a12 12 0 0 0 12.57-12v-47.4a12 12 0 0 0-12-12H12a12 12 0 0 0-12 12V500a12 12 0 0 0 12 12h47.35a12 12 0 0 0 12-12.6l-4.15-82.57A247.17 247.17 0 0 0 255.83 504c121.11 0 221.93-86.92 243.55-201.82a12 12 0 0 0-11.8-14.18h-49.05a12 12 0 0 0-11.67 9.26A175.86 175.86 0 0 1 255.83 432z"},"child":[]}]})(props);
@@ -93,6 +95,8 @@ function FaTerminal (props) {
   return GenIcon({"attr":{"viewBox":"0 0 576 512"},"child":[{"tag":"path","attr":{"d":"M569.517 440.013C587.975 472.007 564.806 512 527.94 512H48.054c-36.937 0-59.999-40.055-41.577-71.987L246.423 23.985c18.467-32.009 64.72-31.951 83.154 0l239.94 416.028zM288 354c-25.405 0-46 20.595-46 46s20.595 46 46 46 46-20.595 46-46-20.595-46-46-46zm-43.673-165.346l7.418 136c.347 6.364 5.609 11.346 11.982 11.346h48.546c6.373 0 11.635-4.982 11.982-11.346l7.418-136c.375-6.874-5.098-12.654-11.982-12.654h-63.383c-6.884 0-12.356 5.78-11.981 12.654z"},"child":[]}]})(props);
 }function FaDownload (props) {
   return GenIcon({"attr":{"viewBox":"0 0 512 512"},"child":[{"tag":"path","attr":{"d":"M216 0h80c13.3 0 24 10.7 24 24v168h87.7c17.8 0 26.7 21.5 14.1 34.1L269.7 378.3c-7.5 7.5-19.8 7.5-27.3 0L90.1 226.1c-12.6-12.6-3.7-34.1 14.1-34.1H192V24c0-13.3 10.7-24 24-24zm296 376v112c0 13.3-10.7 24-24 24H24c-13.3 0-24-10.7-24-24V376c0-13.3 10.7-24 24-24h146.7l49 49c20.1 20.1 52.5 20.1 72.6 0l49-49H488c13.3 0 24 10.7 24 24zm-124 88c0-11-9-20-20-20s-20 9-20 20 9 20 20 20 20-9 20-20zm64 0c0-11-9-20-20-20s-20 9-20 20 9 20 20 20 20-9 20-20z"},"child":[]}]})(props);
+}function FaCopy (props) {
+  return GenIcon({"attr":{"viewBox":"0 0 448 512"},"child":[{"tag":"path","attr":{"d":"M320 448v40c0 13.255-10.745 24-24 24H24c-13.255 0-24-10.745-24-24V120c0-13.255 10.745-24 24-24h72v296c0 30.879 25.121 56 56 56h168zm0-344V0H152c-13.255 0-24 10.745-24 24v368c0 13.255 10.745 24 24 24h272c13.255 0 24-10.745 24-24V128H344c-13.2 0-24-10.8-24-24zm120.971-31.029L375.029 7.029A24 24 0 0 0 358.059 0H352v96h96v-6.059a24 24 0 0 0-7.029-16.97z"},"child":[]}]})(props);
 }function FaCheckCircle (props) {
   return GenIcon({"attr":{"viewBox":"0 0 512 512"},"child":[{"tag":"path","attr":{"d":"M504 256c0 136.967-111.033 248-248 248S8 392.967 8 256 119.033 8 256 8s248 111.033 248 248zM227.314 387.314l184-184c6.248-6.248 6.248-16.379 0-22.627l-22.627-22.627c-6.248-6.249-16.379-6.249-22.628 0L216 308.118l-70.059-70.059c-6.248-6.248-16.379-6.248-22.628 0l-22.627 22.627c-6.248 6.248-6.248 16.379 0 22.627l104 104c6.249 6.249 16.379 6.249 22.628.001z"},"child":[]}]})(props);
 }function FaBrain (props) {
@@ -103,6 +107,20 @@ const getStatus = callable("status");
 const getConfig = callable("get_config");
 const saveConfig = callable("save_config");
 const installRuntime = callable("install_runtime");
+const getInstallProgress = callable("get_install_progress");
+const STATUS_GLYPH = {
+    start: "▶",
+    try: "·",
+    info: "·",
+    ok: "✓",
+    fail: "✗",
+    skip: "—",
+};
+const formatInstallEvent = (e) => {
+    const glyph = STATUS_GLYPH[e.status] ?? "·";
+    const tail = e.message ? ` ${e.message}` : "";
+    return `${glyph} [${e.stage}]${tail}`;
+};
 const startTurn = callable("start_turn");
 const getTurn = callable("get_turn");
 const answerPermission = callable("answer_permission");
@@ -117,14 +135,24 @@ const colors = {
 };
 const modelOptionsByProvider = {
     openai: [
-        { label: "GPT-4.1 Mini", value: "gpt-4.1-mini" },
-        { label: "GPT-4.1", value: "gpt-4.1" },
-        { label: "GPT-4o Mini", value: "gpt-4o-mini" },
+        { label: "GPT-5.5", value: "gpt-5.5" },
+        { label: "GPT-5.4 Mini", value: "gpt-5.4-mini" },
+        { label: "GPT-5.4 Nano", value: "gpt-5.4-nano" },
+        { label: "GPT-5.3 Codex", value: "gpt-5.3-codex" },
+        { label: "GPT-4.1（兼容旧）", value: "gpt-4.1" },
+        { label: "GPT-4o Mini（兼容旧）", value: "gpt-4o-mini" },
     ],
     "openai-chat": [
-        { label: "GPT-4.1 Mini", value: "gpt-4.1-mini" },
-        { label: "GPT-4.1", value: "gpt-4.1" },
-        { label: "GPT-4o Mini", value: "gpt-4o-mini" },
+        { label: "GPT-5.5", value: "gpt-5.5" },
+        { label: "GPT-5.4 Mini", value: "gpt-5.4-mini" },
+        { label: "GPT-5.4 Nano", value: "gpt-5.4-nano" },
+        { label: "GPT-4.1（兼容旧）", value: "gpt-4.1" },
+        { label: "GPT-4o Mini（兼容旧）", value: "gpt-4o-mini" },
+    ],
+    anthropic: [
+        { label: "Claude Opus 4.7", value: "claude-opus-4-7" },
+        { label: "Claude Sonnet 4.6", value: "claude-sonnet-4-6" },
+        { label: "Claude Haiku 4.5", value: "claude-haiku-4-5" },
     ],
     deepseek: [
         { label: "DeepSeek V4 Flash", value: "deepseek-v4-flash" },
@@ -133,9 +161,16 @@ const modelOptionsByProvider = {
         { label: "DeepSeek Reasoner（兼容，2026-07-24 弃用）", value: "deepseek-reasoner" },
     ],
     moonshot: [
-        { label: "Kimi K2", value: "kimi-k2-0711-preview" },
-        { label: "Moonshot v1 8K", value: "moonshot-v1-8k" },
-        { label: "Moonshot v1 32K", value: "moonshot-v1-32k" },
+        { label: "Kimi K2.6", value: "kimi-k2.6" },
+        { label: "Kimi K2.5（多模态）", value: "kimi-k2.5" },
+        { label: "Moonshot v1 8K（兼容旧）", value: "moonshot-v1-8k" },
+        { label: "Moonshot v1 32K（兼容旧）", value: "moonshot-v1-32k" },
+    ],
+    "moonshot-global": [
+        { label: "Kimi K2.6", value: "kimi-k2.6" },
+        { label: "Kimi K2.5（多模态）", value: "kimi-k2.5" },
+        { label: "Moonshot v1 8K（兼容旧）", value: "moonshot-v1-8k" },
+        { label: "Moonshot v1 32K（兼容旧）", value: "moonshot-v1-32k" },
     ],
     qwen: [
         { label: "Qwen Plus", value: "qwen-plus" },
@@ -154,6 +189,38 @@ function welcomeMessageForStatus(status) {
 }
 function nextId() {
     return Date.now() + Math.floor(Math.random() * 1000);
+}
+// 对话历史持久化到 localStorage，避免切走面板再切回 / Steam 重启就清空。
+const HISTORY_KEY = "deckmind:chat-history";
+function loadHistory() {
+    try {
+        const raw = window.localStorage.getItem(HISTORY_KEY);
+        if (!raw) {
+            return [];
+        }
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    }
+    catch {
+        return [];
+    }
+}
+function saveHistory(messages) {
+    try {
+        window.localStorage.setItem(HISTORY_KEY, JSON.stringify(messages.slice(-200)));
+    }
+    catch {
+        /* 隐私模式 / 容量超限：丢历史不影响主流程 */
+    }
+}
+async function copyToClipboard(text) {
+    try {
+        await navigator.clipboard.writeText(text);
+        toaster.toast({ title: "DeckMind", body: "已复制到剪贴板" });
+    }
+    catch {
+        toaster.toast({ title: "DeckMind", body: "复制失败，请手动选择文本" });
+    }
 }
 function messageStyle(role) {
     const alignSelf = role === "user" ? "flex-end" : "flex-start";
@@ -176,8 +243,13 @@ function messageStyle(role) {
         wordBreak: "break-word",
     };
 }
-function StatusBar({ busy, config, onRefresh, status, }) {
-    const installed = Boolean(status?.installed);
+function StatusBar({ busy, config, configOpen, onRefresh, onToggleConfig, status, }) {
+    const installed = status?.installed === true;
+    const runtimeLabel = status
+        ? installed
+            ? status.version ?? "unknown"
+            : "未安装"
+        : "检测中";
     const hasApiKey = Boolean(config?.has_api_key);
     const badgeStyle = (ok) => ({
         alignItems: "center",
@@ -210,7 +282,19 @@ function StatusBar({ busy, config, onRefresh, status, }) {
                 event.preventDefault();
                 onRefresh();
             }
-        }, role: "button", tabIndex: 0, "aria-disabled": busy, "aria-label": "\u5237\u65B0 DeckMind \u72B6\u6001", title: "\u70B9\u51FB\u5237\u65B0\u72B6\u6001", children: [SP_JSX.jsxs("div", { style: badgeStyle(installed), children: [installed ? SP_JSX.jsx(FaCheckCircle, { size: 11 }) : SP_JSX.jsx(FaExclamationTriangle, { size: 11 }), installed ? status?.version ?? "unknown" : "未安装"] }), SP_JSX.jsxs("div", { style: badgeStyle(hasApiKey), children: [SP_JSX.jsx(FaKey, { size: 11 }), hasApiKey ? config?.provider ?? "API" : "未配置"] })] }));
+        }, role: "button", tabIndex: 0, "aria-disabled": busy, "aria-label": "\u5237\u65B0 DeckMind \u72B6\u6001", title: "\u70B9\u51FB\u5237\u65B0\u72B6\u6001", children: [SP_JSX.jsxs("div", { style: badgeStyle(installed), children: [installed ? SP_JSX.jsx(FaCheckCircle, { size: 11 }) : SP_JSX.jsx(FaExclamationTriangle, { size: 11 }), runtimeLabel] }), SP_JSX.jsxs("div", { style: { ...badgeStyle(hasApiKey), cursor: busy ? "default" : "pointer" }, onClick: (event) => {
+                    // Don't trigger the parent's onRefresh.
+                    event.stopPropagation();
+                    if (!busy) {
+                        onToggleConfig();
+                    }
+                }, onKeyDown: (event) => {
+                    if (!busy && (event.key === "Enter" || event.key === " ")) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onToggleConfig();
+                    }
+                }, role: "button", tabIndex: 0, "aria-pressed": configOpen, "aria-label": hasApiKey ? "切换 provider / 模型 / API key" : "配置 provider 和 API key", title: hasApiKey ? "点击切换 provider 或更换 API key" : "点击配置 API key", children: [SP_JSX.jsx(FaKey, { size: 11 }), hasApiKey ? config?.provider ?? "API" : "未配置", SP_JSX.jsx("span", { style: { opacity: 0.6, fontSize: 9, marginLeft: 2 }, children: configOpen ? "▴" : "▾" })] })] }));
 }
 function RuntimeCard({ busy, onInstall, onRefresh, status, }) {
     const installed = Boolean(status?.installed);
@@ -227,7 +311,7 @@ function RuntimeCard({ busy, onInstall, onRefresh, status, }) {
                         padding: 10,
                     }, children: [SP_JSX.jsxs("div", { style: { alignItems: "center", display: "flex", gap: 8 }, children: [installed ? SP_JSX.jsx(FaCheckCircle, { color: colors.accent }) : SP_JSX.jsx(FaExclamationTriangle, { color: colors.warn }), SP_JSX.jsx("strong", { children: label })] }), SP_JSX.jsx("div", { style: { color: colors.muted, fontSize: 12, lineHeight: 1.35, wordBreak: "break-word" }, children: detail })] }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 8, width: "100%" }, children: [!installed && (SP_JSX.jsx(DFL.ButtonItem, { disabled: busy, layout: "below", onClick: onInstall, children: SP_JSX.jsxs("span", { style: { alignItems: "center", display: "inline-flex", gap: 8 }, children: [SP_JSX.jsx(FaDownload, {}), "\u5B89\u88C5 Runtime"] }) })), SP_JSX.jsx(DFL.ButtonItem, { disabled: busy, layout: "below", onClick: onRefresh, children: SP_JSX.jsxs("span", { style: { alignItems: "center", display: "inline-flex", gap: 8 }, children: [SP_JSX.jsx(FaSync, {}), "\u5237\u65B0\u72B6\u6001"] }) })] }) })] }));
 }
-function ConfigCard({ busy, config, onSaved, }) {
+function ConfigCard({ busy, config, onSaved, onApiKeySaved, }) {
     const [provider, setProvider] = SP_REACT.useState(config?.provider ?? "openai");
     const [model, setModel] = SP_REACT.useState(config?.model ?? "");
     const [apiKey, setApiKey] = SP_REACT.useState("");
@@ -243,14 +327,33 @@ function ConfigCard({ busy, config, onSaved, }) {
             setModel(defaultModelForProvider(provider));
         }
     }, [model, modelOptions, provider]);
-    const updateProvider = (nextProvider) => {
-        setProvider(nextProvider);
-        setModel(defaultModelForProvider(nextProvider));
+    // 切下拉框立刻持久化，避免"改了 UI 但发消息时还是旧配置"
+    const persistSelection = async (nextProvider, nextModel) => {
+        const saved = await saveConfig({
+            provider: nextProvider,
+            model: nextModel,
+            api_key: "",
+        });
+        onSaved(saved);
     };
-    const persist = async () => {
+    const updateProvider = (nextProvider) => {
+        const nextModel = defaultModelForProvider(nextProvider);
+        setProvider(nextProvider);
+        setModel(nextModel);
+        void persistSelection(nextProvider, nextModel);
+    };
+    const updateModel = (nextModel) => {
+        setModel(nextModel);
+        void persistSelection(provider, nextModel);
+    };
+    const persistApiKey = async () => {
+        if (!apiKey.trim()) {
+            return;
+        }
         const saved = await saveConfig({ provider, model, api_key: apiKey });
         setApiKey("");
         onSaved(saved);
+        onApiKeySaved?.();
     };
     return (SP_JSX.jsx(DFL.PanelSection, { title: "\u914D\u7F6E", children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: {
                     background: colors.panel,
@@ -269,7 +372,7 @@ function ConfigCard({ busy, config, onSaved, }) {
                             color: colors.text,
                             minHeight: 36,
                             padding: "7px 9px",
-                        }, value: provider, children: [SP_JSX.jsx("option", { value: "openai", children: "OpenAI" }), SP_JSX.jsx("option", { value: "openai-chat", children: "OpenAI Chat" }), SP_JSX.jsx("option", { value: "deepseek", children: "DeepSeek" }), SP_JSX.jsx("option", { value: "moonshot", children: "Moonshot" }), SP_JSX.jsx("option", { value: "qwen", children: "Qwen" })] }), SP_JSX.jsx("select", { disabled: busy, onChange: (event) => setModel(event.currentTarget.value), style: {
+                        }, value: provider, children: [SP_JSX.jsx("option", { value: "openai", children: "OpenAI" }), SP_JSX.jsx("option", { value: "openai-chat", children: "OpenAI Chat" }), SP_JSX.jsx("option", { value: "anthropic", children: "Anthropic (Claude)" }), SP_JSX.jsx("option", { value: "deepseek", children: "DeepSeek" }), SP_JSX.jsx("option", { value: "moonshot", children: "Moonshot \u56FD\u5185" }), SP_JSX.jsx("option", { value: "moonshot-global", children: "Moonshot \u56FD\u9645" }), SP_JSX.jsx("option", { value: "qwen", children: "Qwen" })] }), SP_JSX.jsx("select", { disabled: busy, onChange: (event) => updateModel(event.currentTarget.value), style: {
                             background: "rgba(0, 0, 0, 0.22)",
                             border: `1px solid ${colors.border}`,
                             borderRadius: 8,
@@ -287,7 +390,7 @@ function ConfigCard({ busy, config, onSaved, }) {
                             minHeight: 36,
                             padding: "7px 9px",
                             width: "100%",
-                        }, type: "password", value: apiKey }), SP_JSX.jsx(DFL.ButtonItem, { disabled: busy, layout: "below", onClick: () => void persist(), children: "\u4FDD\u5B58\u914D\u7F6E" })] }) }) }));
+                        }, type: "password", value: apiKey }), SP_JSX.jsx(DFL.ButtonItem, { disabled: busy || !apiKey.trim(), layout: "below", onClick: () => void persistApiKey(), children: "\u4FDD\u5B58 API Key" })] }) }) }));
 }
 function Content() {
     const [status, setStatus] = SP_REACT.useState(null);
@@ -296,12 +399,19 @@ function Content() {
     const [draft, setDraft] = SP_REACT.useState("");
     const [activeTurnId, setActiveTurnId] = SP_REACT.useState(null);
     const [permissionRequest, setPermissionRequest] = SP_REACT.useState(null);
-    const [seenEventCount, setSeenEventCount] = SP_REACT.useState(0);
+    const seenEventCountRef = SP_REACT.useRef(0);
     const [pollVersion, setPollVersion] = SP_REACT.useState(0);
-    const [messages, setMessages] = SP_REACT.useState([]);
+    const [messages, setMessages] = SP_REACT.useState(() => loadHistory());
+    const [configOpen, setConfigOpen] = SP_REACT.useState(false);
+    const messagesEndRef = SP_REACT.useRef(null);
     const appendMessage = (role, text) => {
         setMessages((current) => [...current, { id: nextId(), role, text }]);
     };
+    // 新消息后自动滚到底 + 持久化到 localStorage
+    SP_REACT.useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+        saveHistory(messages);
+    }, [messages]);
     const refresh = async () => {
         try {
             const [latestStatus, latestConfig] = await Promise.all([
@@ -340,9 +450,9 @@ function Content() {
                 if (cancelled) {
                     return;
                 }
-                if (state.events.length > seenEventCount) {
-                    const newEvents = state.events.slice(seenEventCount);
-                    setSeenEventCount(state.events.length);
+                if (state.events.length > seenEventCountRef.current) {
+                    const newEvents = state.events.slice(seenEventCountRef.current);
+                    seenEventCountRef.current = state.events.length;
                     const toolEvents = newEvents
                         .filter((event) => event.type === "tool_start" || event.type === "tool_result")
                         .map((event) => `${event.type}: ${event.name ?? ""}`)
@@ -388,26 +498,59 @@ function Content() {
         return () => {
             cancelled = true;
         };
-    }, [activeTurnId, pollVersion, seenEventCount]);
+    }, [activeTurnId, pollVersion]);
     const runInstall = async () => {
         setBusy(true);
+        let cursor = 0;
+        let pollTimer;
+        const drain = async () => {
+            try {
+                const progress = await getInstallProgress(cursor);
+                if (progress.events.length > 0) {
+                    cursor = progress.total;
+                    for (const ev of progress.events) {
+                        appendMessage("system", formatInstallEvent(ev));
+                    }
+                }
+            }
+            catch {
+                // RPC error during polling is non-fatal; the final result still
+                // comes back via installRuntime().
+            }
+        };
         try {
-            appendMessage("system", "开始下载并安装 Runtime...");
+            appendMessage("system", "▶ 开始下载并安装 Runtime...");
+            // Reset the backend cursor by reading total once before kicking off.
+            try {
+                const seed = await getInstallProgress(0);
+                cursor = seed.total;
+            }
+            catch {
+                /* first call may race with reset; safe to ignore */
+            }
+            pollTimer = window.setInterval(() => {
+                void drain();
+            }, 500);
             const result = await installRuntime();
+            // Flush any events emitted between the last poll and finish.
+            await drain();
             await refresh();
             if (result.ok) {
                 appendMessage("assistant", `Runtime 已安装到 ${result.runtime_dir ?? "本机目录"}`);
             }
             else {
-                appendMessage("system", result.error ?? "Runtime 安装失败");
+                appendMessage("system", `✗ ${result.error ?? "Runtime 安装失败"}`);
             }
         }
         catch (error) {
             const body = String(error);
-            appendMessage("system", body);
+            appendMessage("system", `✗ ${body}`);
             toaster.toast({ title: "DeckMind 安装失败", body });
         }
         finally {
+            if (pollTimer !== undefined) {
+                window.clearInterval(pollTimer);
+            }
             setBusy(false);
         }
     };
@@ -420,7 +563,7 @@ function Content() {
         setBusy(true);
         appendMessage("user", text);
         try {
-            setSeenEventCount(0);
+            seenEventCountRef.current = 0;
             setPermissionRequest(null);
             const result = await startTurn(text);
             if (result.ok && result.turn_id) {
@@ -456,12 +599,37 @@ function Content() {
             setBusy(false);
         }
     };
+    const clearHistory = () => {
+        setMessages(status
+            ? [{ id: nextId(), role: "assistant", text: welcomeMessageForStatus(status) }]
+            : []);
+    };
     const canSend = SP_REACT.useMemo(() => Boolean(status?.installed) && draft.trim().length > 0 && !busy, [busy, draft, status?.installed]);
-    const installed = Boolean(status?.installed);
-    return (SP_JSX.jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 10 }, children: [SP_JSX.jsx(StatusBar, { busy: busy, config: config, onRefresh: () => void refresh(), status: status }), !installed && (SP_JSX.jsx(RuntimeCard, { busy: busy, onInstall: () => void runInstall(), onRefresh: () => void refresh(), status: status })), SP_JSX.jsx(ConfigCard, { busy: busy, config: config, onSaved: (saved) => {
+    const shouldShowRuntimeCard = status?.installed === false;
+    return (SP_JSX.jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 10 }, children: [SP_JSX.jsxs("div", { style: {
+                    position: "sticky",
+                    top: 0,
+                    zIndex: 20,
+                    background: "rgb(13, 17, 23)",
+                    display: "flex",
+                    alignItems: "stretch",
+                    gap: 6,
+                }, children: [SP_JSX.jsxs("div", { role: "button", tabIndex: 0, onClick: clearHistory, title: "\u6E05\u7A7A\u5BF9\u8BDD\u5386\u53F2", "aria-label": "\u6E05\u7A7A\u5BF9\u8BDD\u5386\u53F2", style: {
+                            alignItems: "center",
+                            background: "rgba(255, 123, 114, 0.09)",
+                            border: "1px solid rgba(255, 123, 114, 0.25)",
+                            borderRadius: 8,
+                            color: colors.danger,
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            fontSize: 11,
+                            fontWeight: 600,
+                            gap: 4,
+                            padding: "0 10px",
+                        }, children: [SP_JSX.jsx(FaTrash, { size: 11 }), "\u6E05\u7A7A"] }), SP_JSX.jsx("div", { style: { flex: 1 }, children: SP_JSX.jsx(StatusBar, { busy: busy, config: config, configOpen: configOpen, onRefresh: () => void refresh(), onToggleConfig: () => setConfigOpen((open) => !open), status: status }) })] }), shouldShowRuntimeCard && (SP_JSX.jsx(RuntimeCard, { busy: busy, onInstall: () => void runInstall(), onRefresh: () => void refresh(), status: status })), (!config?.has_api_key || configOpen) && (SP_JSX.jsx(ConfigCard, { busy: busy, config: config, onSaved: (saved) => {
                     setConfig(saved);
                     appendMessage("system", "配置已保存");
-                } }), permissionRequest && (SP_JSX.jsx(DFL.PanelSection, { title: "\u9700\u8981\u786E\u8BA4", children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: {
+                }, onApiKeySaved: () => setConfigOpen(false) })), permissionRequest && (SP_JSX.jsx(DFL.PanelSection, { title: "\u9700\u8981\u786E\u8BA4", children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: {
                             background: "rgba(20, 23, 28, 0.94)",
                             border: `1px solid rgba(246, 193, 119, 0.28)`,
                             borderRadius: 10,
@@ -503,7 +671,7 @@ function Content() {
                                             fontSize: 13,
                                             fontWeight: 600,
                                             padding: "7px 0",
-                                        }, children: "\u62D2\u7EDD" })] })] }) }) })), SP_JSX.jsx(DFL.PanelSection, { title: "\u5BF9\u8BDD", children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: {
+                                        }, children: "\u62D2\u7EDD" })] })] }) }) })), SP_JSX.jsx(DFL.PanelSection, { title: "\u5BF9\u8BDD", children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: {
                             display: "flex",
                             flexDirection: "column",
                             gap: 8,
@@ -511,7 +679,23 @@ function Content() {
                             minHeight: 160,
                             overflowY: "auto",
                             paddingRight: 2,
-                        }, children: messages.map((message) => (SP_JSX.jsx("div", { style: messageStyle(message.role), children: message.text }, message.id))) }) }) }), SP_JSX.jsx(DFL.PanelSection, { children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 8, width: "100%" }, children: [SP_JSX.jsx("input", { disabled: !status?.installed || busy, onChange: (event) => setDraft(event.currentTarget.value), onKeyDown: (event) => {
+                        }, children: [messages.map((message) => {
+                                const isError = message.role === "system" && message.text.startsWith("✗");
+                                return (SP_JSX.jsxs("div", { style: { ...messageStyle(message.role), position: "relative" }, children: [isError && (SP_JSX.jsxs("div", { role: "button", tabIndex: 0, onClick: () => void copyToClipboard(message.text), title: "\u590D\u5236\u9519\u8BEF\u4FE1\u606F", style: {
+                                                position: "absolute",
+                                                top: 4,
+                                                right: 4,
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: 4,
+                                                padding: "2px 6px",
+                                                borderRadius: 6,
+                                                cursor: "pointer",
+                                                background: "rgba(0, 0, 0, 0.28)",
+                                                color: colors.muted,
+                                                fontSize: 11,
+                                            }, children: [SP_JSX.jsx(FaCopy, { size: 10 }), "\u590D\u5236"] })), SP_JSX.jsx("div", { style: isError ? { paddingRight: 52 } : undefined, children: message.text })] }, message.id));
+                            }), SP_JSX.jsx("div", { ref: messagesEndRef })] }) }) }), SP_JSX.jsx(DFL.PanelSection, { children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 8, width: "100%" }, children: [SP_JSX.jsx("input", { disabled: !status?.installed || busy, onChange: (event) => setDraft(event.currentTarget.value), onKeyDown: (event) => {
                                     if (event.key === "Enter") {
                                         void send();
                                     }

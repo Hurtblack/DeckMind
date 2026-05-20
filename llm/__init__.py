@@ -28,7 +28,7 @@ PROVIDERS: dict[str, dict] = {
     "openai": {
         "client": "responses",
         "api_key_env": "OPENAI_API_KEY",
-        "default_model": "gpt-4o-mini",
+        "default_model": "gpt-5.4-mini",
     },
     # OpenAI via the legacy Chat Completions endpoint (for users who
     # want the same code path as DeepSeek/Kimi/etc).
@@ -36,7 +36,15 @@ PROVIDERS: dict[str, dict] = {
         "client": "chat",
         "api_key_env": "OPENAI_API_KEY",
         "base_url": None,
-        "default_model": "gpt-4o-mini",
+        "default_model": "gpt-5.4-mini",
+    },
+    # Anthropic Claude via the OpenAI-compatible endpoint.
+    # https://platform.claude.com/docs/en/api/openai-sdk
+    "anthropic": {
+        "client": "chat",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "base_url": "https://api.anthropic.com/v1",
+        "default_model": "claude-sonnet-4-6",
     },
     # DeepSeek — https://api-docs.deepseek.com/
     "deepseek": {
@@ -45,12 +53,19 @@ PROVIDERS: dict[str, dict] = {
         "base_url": "https://api.deepseek.com",
         "default_model": "deepseek-v4-flash",
     },
-    # Moonshot (Kimi) — https://platform.moonshot.cn/
+    # Moonshot (Kimi) 国内 — https://platform.moonshot.cn/
     "moonshot": {
         "client": "chat",
         "api_key_env": "MOONSHOT_API_KEY",
         "base_url": "https://api.moonshot.cn/v1",
-        "default_model": "moonshot-v1-8k",
+        "default_model": "kimi-k2.6",
+    },
+    # Moonshot (Kimi) 国际 — https://platform.moonshot.ai/
+    "moonshot-global": {
+        "client": "chat",
+        "api_key_env": "MOONSHOT_API_KEY",
+        "base_url": "https://api.moonshot.ai/v1",
+        "default_model": "kimi-k2.6",
     },
     # Alibaba Qwen via the OpenAI-compatible mode.
     "qwen": {

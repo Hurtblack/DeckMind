@@ -9,12 +9,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FaBrain,
   FaCheckCircle,
+  FaCopy,
   FaDownload,
   FaExclamationTriangle,
   FaKey,
   FaPaperPlane,
   FaSync,
   FaTerminal,
+  FaTrash,
 } from "react-icons/fa";
 
 type RuntimeStatus = {
@@ -127,14 +129,24 @@ const colors = {
 
 const modelOptionsByProvider: Record<string, { label: string; value: string }[]> = {
   openai: [
-    { label: "GPT-4.1 Mini", value: "gpt-4.1-mini" },
-    { label: "GPT-4.1", value: "gpt-4.1" },
-    { label: "GPT-4o Mini", value: "gpt-4o-mini" },
+    { label: "GPT-5.5", value: "gpt-5.5" },
+    { label: "GPT-5.4 Mini", value: "gpt-5.4-mini" },
+    { label: "GPT-5.4 Nano", value: "gpt-5.4-nano" },
+    { label: "GPT-5.3 Codex", value: "gpt-5.3-codex" },
+    { label: "GPT-4.1（兼容旧）", value: "gpt-4.1" },
+    { label: "GPT-4o Mini（兼容旧）", value: "gpt-4o-mini" },
   ],
   "openai-chat": [
-    { label: "GPT-4.1 Mini", value: "gpt-4.1-mini" },
-    { label: "GPT-4.1", value: "gpt-4.1" },
-    { label: "GPT-4o Mini", value: "gpt-4o-mini" },
+    { label: "GPT-5.5", value: "gpt-5.5" },
+    { label: "GPT-5.4 Mini", value: "gpt-5.4-mini" },
+    { label: "GPT-5.4 Nano", value: "gpt-5.4-nano" },
+    { label: "GPT-4.1（兼容旧）", value: "gpt-4.1" },
+    { label: "GPT-4o Mini（兼容旧）", value: "gpt-4o-mini" },
+  ],
+  anthropic: [
+    { label: "Claude Opus 4.7", value: "claude-opus-4-7" },
+    { label: "Claude Sonnet 4.6", value: "claude-sonnet-4-6" },
+    { label: "Claude Haiku 4.5", value: "claude-haiku-4-5" },
   ],
   deepseek: [
     { label: "DeepSeek V4 Flash", value: "deepseek-v4-flash" },
@@ -143,9 +155,16 @@ const modelOptionsByProvider: Record<string, { label: string; value: string }[]>
     { label: "DeepSeek Reasoner（兼容，2026-07-24 弃用）", value: "deepseek-reasoner" },
   ],
   moonshot: [
-    { label: "Kimi K2", value: "kimi-k2-0711-preview" },
-    { label: "Moonshot v1 8K", value: "moonshot-v1-8k" },
-    { label: "Moonshot v1 32K", value: "moonshot-v1-32k" },
+    { label: "Kimi K2.6", value: "kimi-k2.6" },
+    { label: "Kimi K2.5（多模态）", value: "kimi-k2.5" },
+    { label: "Moonshot v1 8K（兼容旧）", value: "moonshot-v1-8k" },
+    { label: "Moonshot v1 32K（兼容旧）", value: "moonshot-v1-32k" },
+  ],
+  "moonshot-global": [
+    { label: "Kimi K2.6", value: "kimi-k2.6" },
+    { label: "Kimi K2.5（多模态）", value: "kimi-k2.5" },
+    { label: "Moonshot v1 8K（兼容旧）", value: "moonshot-v1-8k" },
+    { label: "Moonshot v1 32K（兼容旧）", value: "moonshot-v1-32k" },
   ],
   qwen: [
     { label: "Qwen Plus", value: "qwen-plus" },
@@ -168,6 +187,43 @@ function welcomeMessageForStatus(status: RuntimeStatus) {
 
 function nextId() {
   return Date.now() + Math.floor(Math.random() * 1000);
+}
+
+// 对话历史持久化到 localStorage，避免切走面板再切回 / Steam 重启就清空。
+const HISTORY_KEY = "deckmind:chat-history";
+const HISTORY_LIMIT = 200;
+
+function loadHistory(): Message[] {
+  try {
+    const raw = window.localStorage.getItem(HISTORY_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as Message[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(messages: Message[]) {
+  try {
+    window.localStorage.setItem(
+      HISTORY_KEY,
+      JSON.stringify(messages.slice(-HISTORY_LIMIT)),
+    );
+  } catch {
+    /* 隐私模式 / 容量超限：丢历史不影响主流程 */
+  }
+}
+
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toaster.toast({ title: "DeckMind", body: "已复制到剪贴板" });
+  } catch {
+    toaster.toast({ title: "DeckMind", body: "复制失败，请手动选择文本" });
+  }
 }
 
 function messageStyle(role: Message["role"]) {
@@ -450,8 +506,10 @@ function ConfigCard({
           >
             <option value="openai">OpenAI</option>
             <option value="openai-chat">OpenAI Chat</option>
+            <option value="anthropic">Anthropic (Claude)</option>
             <option value="deepseek">DeepSeek</option>
-            <option value="moonshot">Moonshot</option>
+            <option value="moonshot">Moonshot 国内</option>
+            <option value="moonshot-global">Moonshot 国际</option>
             <option value="qwen">Qwen</option>
           </select>
           <select
@@ -514,7 +572,7 @@ function Content() {
   const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
   const seenEventCountRef = useRef(0);
   const [pollVersion, setPollVersion] = useState(0);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(() => loadHistory());
   const [configOpen, setConfigOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -522,9 +580,10 @@ function Content() {
     setMessages((current) => [...current, { id: nextId(), role, text }]);
   };
 
-  // 新消息后自动滚到底
+  // 新消息后自动滚到底 + 持久化到 localStorage
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    saveHistory(messages);
   }, [messages]);
 
   const refresh = async () => {
@@ -729,6 +788,14 @@ function Content() {
     }
   };
 
+  const clearHistory = () => {
+    setMessages(
+      status
+        ? [{ id: nextId(), role: "assistant", text: welcomeMessageForStatus(status) }]
+        : [],
+    );
+  };
+
   const canSend = useMemo(
     () => Boolean(status?.installed) && draft.trim().length > 0 && !busy,
     [busy, draft, status?.installed],
@@ -738,14 +805,51 @@ function Content() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <StatusBar
-        busy={busy}
-        config={config}
-        configOpen={configOpen}
-        onRefresh={() => void refresh()}
-        onToggleConfig={() => setConfigOpen((open) => !open)}
-        status={status}
-      />
+      <div
+        style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 20,
+          background: "rgb(13, 17, 23)",
+          display: "flex",
+          alignItems: "stretch",
+          gap: 6,
+        }}
+      >
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={clearHistory}
+          title="清空对话历史"
+          aria-label="清空对话历史"
+          style={{
+            alignItems: "center",
+            background: "rgba(255, 123, 114, 0.09)",
+            border: "1px solid rgba(255, 123, 114, 0.25)",
+            borderRadius: 8,
+            color: colors.danger,
+            cursor: "pointer",
+            display: "inline-flex",
+            fontSize: 11,
+            fontWeight: 600,
+            gap: 4,
+            padding: "0 10px",
+          }}
+        >
+          <FaTrash size={11} />
+          清空
+        </div>
+        <div style={{ flex: 1 }}>
+          <StatusBar
+            busy={busy}
+            config={config}
+            configOpen={configOpen}
+            onRefresh={() => void refresh()}
+            onToggleConfig={() => setConfigOpen((open) => !open)}
+            status={status}
+          />
+        </div>
+      </div>
 
       {shouldShowRuntimeCard && (
         <RuntimeCard
@@ -868,11 +972,45 @@ function Content() {
               paddingRight: 2,
             }}
           >
-            {messages.map((message) => (
-              <div key={message.id} style={messageStyle(message.role)}>
-                {message.text}
-              </div>
-            ))}
+            {messages.map((message) => {
+              const isError =
+                message.role === "system" && message.text.startsWith("✗");
+              return (
+                <div
+                  key={message.id}
+                  style={{ ...messageStyle(message.role), position: "relative" }}
+                >
+                  {isError && (
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => void copyToClipboard(message.text)}
+                      title="复制错误信息"
+                      style={{
+                        position: "absolute",
+                        top: 4,
+                        right: 4,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
+                        padding: "2px 6px",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                        background: "rgba(0, 0, 0, 0.28)",
+                        color: colors.muted,
+                        fontSize: 11,
+                      }}
+                    >
+                      <FaCopy size={10} />
+                      复制
+                    </div>
+                  )}
+                  <div style={isError ? { paddingRight: 52 } : undefined}>
+                    {message.text}
+                  </div>
+                </div>
+              );
+            })}
             <div ref={messagesEndRef} />
           </div>
         </PanelSectionRow>

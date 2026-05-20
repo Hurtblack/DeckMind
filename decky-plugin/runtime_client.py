@@ -23,8 +23,10 @@ from installer import RUNTIME_HOME
 API_KEY_ENVS: dict[str, str] = {
     "openai": "OPENAI_API_KEY",
     "openai-chat": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
     "moonshot": "MOONSHOT_API_KEY",
+    "moonshot-global": "MOONSHOT_API_KEY",
     "qwen": "DASHSCOPE_API_KEY",
 }
 

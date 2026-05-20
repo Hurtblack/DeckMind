@@ -66,11 +66,11 @@ pydantic_core 的 .so 是 Python 版本绑定的，不兼容会报 `ModuleNotFou
 
 ---
 
-### #2 install_runtime 失败时 UI 仍能看到错误（目前可能被吞）
-**问题**：install_async 异常虽然返回 `{ok: false, error}`，但 UI [index.tsx](src/index.tsx) 里 system message 区域显示空错误时不易察觉。
-**修复方案**：
-- 安装失败时，UI 显式弹 toaster.toast 标题红色 + 文案
-- 错误超过 200 字符自动折叠，提供"展开/复制"
+### ~~#2 install_runtime 失败时错误不便复制~~ ✅ 已修
+**背景**：#8 修完后失败信息已实时输出到聊天区（含 pip 完整输出），本条价值缩水。
+toaster 一闪而过没法复制，故弃用 toaster 方案，改为在对话里的失败消息（`✗` 开头的
+system 消息）右上角加复制小按钮，点一下 `navigator.clipboard.writeText` 整段错误，
+方便用户贴去求助。安装失败时仍保留一个 toaster 做醒目闪提示。
 
 ---
 
@@ -216,6 +216,7 @@ curl -sSL https://raw.githubusercontent.com/Hurtblack/DeckMind/main/scripts/fix-
 | `bf3860c` | launch_game 按 AppId 验证真的起来，不再只看 Steam Client |
 | `cc350c8` | session_env 优先读 Decky 注入的 DECKY_USER |
 | `1565398` | #8 安装阶段实时流式输出到聊天界面 |
+| (待提交) | #2 失败消息加复制小按钮（弃用 toaster 复制方案）|
 
 ---
 
