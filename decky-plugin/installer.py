@@ -638,6 +638,10 @@ class RuntimeInstaller:
 
         self._fix_permissions()
 
+        # 顺带把 plugin 本体（含 dist/index.js）同步到最新——
+        # runtime 是整个仓库的 clone，含 decky-plugin/ 子目录。
+        plugin_result = self._sync_plugin()
+
         return {
             "ok": True,
             "installed": True,
@@ -646,6 +650,57 @@ class RuntimeInstaller:
             "commit": commit,
             "branch": self.branch,
             "deps": deps_result,
+            "plugin": plugin_result,
+        }
+
+    def _sync_plugin(self) -> dict[str, Any]:
+        """把 runtime 仓库里的 decky-plugin/ 同步到当前 plugin 目录。
+
+        runtime_dir 是整个 DeckMind 仓库的 git clone，其中包含 decky-plugin/
+        子目录（即 plugin 本体，含构建好的 dist/index.js）。git pull 之后这里
+        就是最新的 plugin 代码，复制过来即可让 plugin 自更新。
+
+        注意：复制会覆盖正在运行的 installer.py/main.py，但 Linux 允许覆盖
+        已加载的文件（旧 inode 保留），新代码在下次 Decky 重载 plugin 时生效。
+        所以同步后需要用户在 Decky 重载 plugin（或重启 Steam）。
+        """
+        src = self.runtime_dir / "decky-plugin"
+        dst = Path(__file__).resolve().parent  # 当前 plugin 目录
+
+        if not src.exists():
+            return {"ok": False, "skipped": "runtime 内无 decky-plugin 目录"}
+        if src.resolve() == dst.resolve():
+            return {"ok": True, "skipped": "plugin 目录与源相同，无需同步"}
+
+        # 只同步运行所需文件，跳过开发用目录
+        skip_dirs = {"node_modules", "src", "scripts", "__pycache__", ".git"}
+        skip_files = {"tsconfig.json", "rollup.config.js", "pnpm-lock.yaml",
+                      "package-lock.json", ".gitignore"}
+
+        copied: list[str] = []
+        try:
+            for root, dirs, files in os.walk(src):
+                dirs[:] = [d for d in dirs if d not in skip_dirs]
+                rel = Path(root).relative_to(src)
+                target_dir = dst / rel
+                target_dir.mkdir(parents=True, exist_ok=True)
+                for name in files:
+                    if name in skip_files:
+                        continue
+                    shutil.copy2(Path(root) / name, target_dir / name)
+                    copied.append(str((rel / name)))
+        except OSError as e:
+            return {"ok": False, "error": f"同步 plugin 失败: {e}",
+                    "copied": copied}
+
+        self._emit("plugin", "ok",
+                   f"已同步 plugin 本体（{len(copied)} 个文件），"
+                   f"请在 Decky 重载插件或重启 Steam 生效")
+        return {
+            "ok": True,
+            "plugin_dir": str(dst),
+            "files": len(copied),
+            "note": "plugin 已更新，需在 Decky 重载插件 / 重启 Steam 生效",
         }
 
     async def install_async(self) -> dict[str, Any]:

@@ -619,6 +619,14 @@ function Content() {
                 appendMessage("assistant", isUpdate
                     ? `Runtime 已更新${commit ? ` 到 ${commit}` : ""}`
                     : `Runtime 已安装到 ${result.runtime_dir ?? "本机目录"}`);
+                // 插件本体同步结果
+                const plugin = result.plugin;
+                if (plugin?.ok && plugin.files) {
+                    appendMessage("system", `🔌 插件本体已同步（${plugin.files} 个文件）。${plugin.note ?? "请在 Decky 重载插件或重启 Steam 生效。"}`);
+                }
+                else if (plugin && !plugin.ok) {
+                    appendMessage("system", `⚠ 插件同步失败：${plugin.error ?? plugin.skipped ?? "未知"}`);
+                }
             }
             else {
                 appendMessage("system", `✗ ${result.error ?? "Runtime 操作失败"}`);
