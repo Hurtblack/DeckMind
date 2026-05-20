@@ -267,7 +267,9 @@ uv run python main.py
 The `decky-plugin/` package is a Decky plugin shell for installing the
 runtime and chatting with DeckMind from the Steam Deck UI.
 
-![DeckMind Decky plugin panel](frame.webp)
+![DeckMind Decky plugin before runtime install](deckmind-state-a-not-installed.png)
+
+![DeckMind Decky plugin after install with permission prompt](deckmind-state-b-installed-permission.webp)
 
 - Provider and model selectors now cover OpenAI, OpenAI Chat, Anthropic
   Claude, DeepSeek, Moonshot China, Moonshot Global, and Qwen.
