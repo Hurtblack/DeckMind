@@ -82,6 +82,32 @@ const getStatus = callable<[], RuntimeStatus>("status");
 const getConfig = callable<[], RuntimeConfig>("get_config");
 const saveConfig = callable<[config: Record<string, string>], RuntimeConfig>("save_config");
 const installRuntime = callable<[], BackendResult>("install_runtime");
+
+type InstallProgressEvent = {
+  ts: number;
+  stage: string;
+  status: "start" | "ok" | "fail" | "skip" | "info" | "try";
+  message: string;
+  extra?: Record<string, unknown>;
+};
+const getInstallProgress = callable<
+  [since: number],
+  { events: InstallProgressEvent[]; total: number; running: boolean }
+>("get_install_progress");
+
+const STATUS_GLYPH: Record<InstallProgressEvent["status"], string> = {
+  start: "▶",
+  try: "·",
+  info: "·",
+  ok: "✓",
+  fail: "✗",
+  skip: "—",
+};
+const formatInstallEvent = (e: InstallProgressEvent): string => {
+  const glyph = STATUS_GLYPH[e.status] ?? "·";
+  const tail = e.message ? ` ${e.message}` : "";
+  return `${glyph} [${e.stage}]${tail}`;
+};
 const startTurn = callable<[message: string], BackendResult & { turn_id?: string }>("start_turn");
 const getTurn = callable<[turnId: string], TurnState>("get_turn");
 const answerPermission = callable<
@@ -568,20 +594,58 @@ function Content() {
 
   const runInstall = async () => {
     setBusy(true);
+    let cursor = 0;
+    let pollTimer: number | undefined;
+
+    const drain = async (): Promise<void> => {
+      try {
+        const progress = await getInstallProgress(cursor);
+        if (progress.events.length > 0) {
+          cursor = progress.total;
+          for (const ev of progress.events) {
+            appendMessage("system", formatInstallEvent(ev));
+          }
+        }
+      } catch {
+        // RPC error during polling is non-fatal; the final result still
+        // comes back via installRuntime().
+      }
+    };
+
     try {
-      appendMessage("system", "开始下载并安装 Runtime...");
+      appendMessage("system", "▶ 开始下载并安装 Runtime...");
+      // Reset the backend cursor by reading total once before kicking off.
+      try {
+        const seed = await getInstallProgress(0);
+        cursor = seed.total;
+      } catch {
+        /* first call may race with reset; safe to ignore */
+      }
+      pollTimer = window.setInterval(() => {
+        void drain();
+      }, 500);
+
       const result = await installRuntime();
+      // Flush any events emitted between the last poll and finish.
+      await drain();
+
       await refresh();
       if (result.ok) {
-        appendMessage("assistant", `Runtime 已安装到 ${result.runtime_dir ?? "本机目录"}`);
+        appendMessage(
+          "assistant",
+          `Runtime 已安装到 ${result.runtime_dir ?? "本机目录"}`,
+        );
       } else {
-        appendMessage("system", result.error ?? "Runtime 安装失败");
+        appendMessage("system", `✗ ${result.error ?? "Runtime 安装失败"}`);
       }
     } catch (error) {
       const body = String(error);
-      appendMessage("system", body);
+      appendMessage("system", `✗ ${body}`);
       toaster.toast({ title: "DeckMind 安装失败", body });
     } finally {
+      if (pollTimer !== undefined) {
+        window.clearInterval(pollTimer);
+      }
       setBusy(false);
     }
   };

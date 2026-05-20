@@ -50,6 +50,13 @@ class Plugin:
     async def install_runtime(self) -> dict:
         return await INSTALLER.install_async()
 
+    async def get_install_progress(self, since: int = 0) -> dict:
+        """前端在 install_runtime 运行期间轮询，拿到自 `since` 以后的事件。
+
+        返回 {events, total, running}：把 total 作为下次轮询的 since。
+        """
+        return INSTALLER.get_progress(since)
+
     async def ask(self, message: str) -> dict:
         result = await self.runtime.ask(message)
         if not result.get("ok"):

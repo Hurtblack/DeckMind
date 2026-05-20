@@ -12,6 +12,8 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +65,44 @@ class RuntimeInstaller:
             "DECKMIND_RUNTIME_REPO", DEFAULT_RUNTIME_REPO
         )
         self.branch = branch or os.environ.get("DECKMIND_RUNTIME_BRANCH", DEFAULT_BRANCH)
+        # Progress events — install() runs on a worker thread, UI polls
+        # from the asyncio loop, so all access goes through the lock.
+        self._events_lock = threading.Lock()
+        self._events: list[dict[str, Any]] = []
+        self._install_running = False
+
+    def _emit(self, stage: str, status: str, message: str = "",
+              extra: dict[str, Any] | None = None) -> None:
+        """Append a progress event the UI can poll.
+
+        status conventions: "start" | "ok" | "fail" | "skip" | "info".
+        """
+        event: dict[str, Any] = {
+            "ts": time.time(), "stage": stage, "status": status,
+            "message": message,
+        }
+        if extra:
+            event["extra"] = extra
+        with self._events_lock:
+            self._events.append(event)
+
+    def _reset_progress(self) -> None:
+        with self._events_lock:
+            self._events = []
+            self._install_running = True
+
+    def _finish_progress(self) -> None:
+        with self._events_lock:
+            self._install_running = False
+
+    def get_progress(self, since: int = 0) -> dict[str, Any]:
+        """Return events with index >= `since`, plus the new cursor."""
+        with self._events_lock:
+            return {
+                "events": list(self._events[since:]),
+                "total": len(self._events),
+                "running": self._install_running,
+            }
 
     @property
     def manifest_path(self) -> Path:
@@ -342,6 +382,8 @@ class RuntimeInstaller:
         decky_ver_str = f"{decky_ver[0]}.{decky_ver[1]}"
 
         attempts: list[dict[str, Any]] = []
+        self._emit("deps", "start",
+                   f"安装依赖到 .vendor (目标 Python {decky_ver_str})")
 
         def attempt(via: str, ok: bool, msg: str, extra: dict[str, Any] | None = None) -> None:
             entry: dict[str, Any] = {"via": via, "ok": ok}
@@ -350,10 +392,17 @@ class RuntimeInstaller:
             if extra:
                 entry.update(extra)
             attempts.append(entry)
+            self._emit(
+                f"deps.{via}",
+                "ok" if ok else "fail",
+                "" if ok else msg.splitlines()[-1][:200] if msg else "",
+            )
 
         # ---------- Strategy A: matching system Python ----------
         matched = self._find_matching_python(decky_ver)
         if matched:
+            self._emit("deps.A", "try",
+                       f"找到系统 Python {decky_ver_str}: {matched}")
             ok, msg = self._pip_install_to_vendor(matched, vendor, req_file)
             attempt(f"system_python{decky_ver_str}", ok, msg, {"python": matched})
             if ok:
@@ -361,11 +410,16 @@ class RuntimeInstaller:
                         "via": f"system_python{decky_ver_str}",
                         "decky_python": decky_ver_str,
                         "attempts": attempts}
+        else:
+            self._emit("deps.A", "skip",
+                       f"系统未安装 python{decky_ver_str}，走跨版本路径")
             pep668 = (
                 "externally-managed-environment" in msg
                 or "No module named pip" in msg
             )
             if pep668:
+                self._emit("deps.A", "info",
+                           "系统 pip 被 PEP 668 锁定，建 venv 重试")
                 venv_python, venv_log = self._ensure_venv_python(matched)
                 if venv_python:
                     ok, msg = self._pip_install_to_vendor(venv_python, vendor, req_file)
@@ -395,6 +449,9 @@ class RuntimeInstaller:
         any_ver_str = f"{any_ver[0]}.{any_ver[1]}" if any_ver else "?"
 
         # B: 直接调系统 pip + 跨版本下载
+        self._emit("deps.B", "try",
+                   f"用 {any_python} (Python {any_ver_str}) 下载 Python "
+                   f"{decky_ver_str} 的预编译 wheel")
         ok, msg = self._pip_install_to_vendor(
             any_python, vendor, req_file, target_version=decky_ver,
         )
@@ -413,6 +470,8 @@ class RuntimeInstaller:
             or "No module named pip" in msg
         )
         if pep668:
+            self._emit("deps.C", "try",
+                       "系统 pip 被 PEP 668 锁定，在 venv 内跨版本下载")
             venv_python, venv_log = self._ensure_venv_python(any_python)
             if venv_python is None:
                 return {
@@ -461,18 +520,20 @@ class RuntimeInstaller:
         git_dir = self.runtime_dir / ".git"
 
         if self.runtime_dir.exists() and git_dir.exists():
-            # 已是 git 仓库 → pull 更新
             action = "pulled"
+            self._emit("git", "start", f"git pull origin/{self.branch}")
             self._run_git(["fetch", "origin", self.branch], cwd=self.runtime_dir)
             self._run_git(["reset", "--hard", f"origin/{self.branch}"], cwd=self.runtime_dir)
+            self._emit("git", "ok", "更新代码完成")
         else:
-            # 目录已存在但不是 git 仓库 → 备份再 clone
             if self.runtime_dir.exists():
                 backup = self.runtime_dir.with_suffix(".bak")
                 if backup.exists():
                     shutil.rmtree(backup)
                 self.runtime_dir.rename(backup)
+                self._emit("git", "info", f"非 git 目录已备份到 {backup.name}")
             action = "cloned"
+            self._emit("git", "start", f"git clone {self.repo_url} ({self.branch})")
             self._run_git(
                 [
                     "clone",
@@ -482,8 +543,8 @@ class RuntimeInstaller:
                     str(self.runtime_dir),
                 ]
             )
+            self._emit("git", "ok", "克隆代码完成")
 
-        # git clone / pull 完成后，安装 Python 依赖到 runtime/.vendor
         deps_result = self._install_python_deps()
 
         commit = self._git_commit() or "unknown"
@@ -497,6 +558,7 @@ class RuntimeInstaller:
         self.manifest_path.write_text(
             json.dumps(manifest, indent=2), encoding="utf-8"
         )
+        self._emit("manifest", "ok", f"已写入 {self.manifest_path.name}")
 
         return {
             "ok": True,
@@ -505,20 +567,40 @@ class RuntimeInstaller:
             "runtime_dir": str(self.runtime_dir),
             "commit": commit,
             "branch": self.branch,
+            "deps": deps_result,
         }
 
     async def install_async(self) -> dict[str, Any]:
-        """从 async 上下文安全调用，不阻塞 Decky 事件循环。"""
+        """从 async 上下文安全调用，不阻塞 Decky 事件循环。
+
+        包了 progress buffer 的 reset/finish，并把最终结果也作为事件
+        emit 出来，前端轮询时拿到的最后一条就是终态。
+        """
+        self._reset_progress()
+        self._emit("install", "start", "开始安装 Runtime")
         try:
-            return await asyncio.to_thread(self.install)
+            result = await asyncio.to_thread(self.install)
         except Exception as e:
+            err_msg = str(e)
+            self._emit("install", "fail", err_msg)
+            self._finish_progress()
             return {
                 "ok": False,
                 "installed": (self.runtime_dir / "main.py").exists(),
-                "error": str(e),
+                "error": err_msg,
                 "repo_url": self.repo_url,
                 "branch": self.branch,
             }
+        # deps 阶段失败时 install() 仍返回 ok=True（外壳成功，依赖没成）
+        deps = result.get("deps") or {}
+        if not deps.get("ok", True):
+            self._emit("install", "fail",
+                       f"依赖安装失败：{deps.get('error', '')[:200]}")
+        else:
+            self._emit("install", "ok",
+                       f"安装完成 (commit {result.get('commit', '?')})")
+        self._finish_progress()
+        return result
 
 
 INSTALLER = RuntimeInstaller()
