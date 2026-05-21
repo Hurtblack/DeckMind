@@ -322,19 +322,19 @@ function runFrontendAction(action: FrontendAction): string {
 
   try {
     if (action.type === "run_game") {
-      // 首选 SteamClient.Apps.LaunchApp：这是其他 Decky 插件（NonSteamLaunchers
-      // 等）在 Game Mode 下成功启动游戏的标准方式，直接传 Steam AppID 数字。
+      // 首选 ExecuteSteamURL：在 Steam 前端内部执行 steam:// URI，无确认弹窗，
+      // 已验证在 Game Mode 下可用（9910c75）。
+      const exec = client.URL?.ExecuteSteamURL;
+      if (typeof exec === "function") {
+        exec(`steam://rungameid/${gameId}`);
+        return `▶ 已通过 Steam 启动「${label}」（appid ${appId}）`;
+      }
+      // 回退 1：Apps.LaunchApp——NonSteamLaunchers 等插件常用。
       const launch = client.Apps?.LaunchApp as
         | ((appId: number) => void)
         | undefined;
       if (typeof launch === "function") {
         launch(Number(appId));
-        return `▶ 已通过 Steam 启动「${label}」（appid ${appId}）`;
-      }
-      // 回退 1：ExecuteSteamURL 在 Steam 前端内部执行 steam:// URI，无确认弹窗。
-      const exec = client.URL?.ExecuteSteamURL;
-      if (typeof exec === "function") {
-        exec(`steam://rungameid/${gameId}`);
         return `▶ 已通过 Steam 启动「${label}」（appid ${appId}）`;
       }
       // 回退 2：Apps.RunGame。launchSource=100 即 LibraryDetails。
