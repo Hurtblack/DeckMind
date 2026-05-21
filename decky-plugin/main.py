@@ -10,9 +10,16 @@ _PLUGIN_DIR = Path(__file__).resolve().parent
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
-# 告诉 runtime 的 steam_tool：在 Decky 里运行，启动/关闭游戏走前端
-# SteamClient（无 steam:// 确认弹窗），而不是后端 subprocess 调 steam。
-os.environ.setdefault("DECKMIND_FRONTEND_LAUNCH", "1")
+# 启动/关闭游戏走后端 subprocess（steam steam://rungameid + 进程校验）。
+#
+# 曾经在这里设 DECKMIND_FRONTEND_LAUNCH=1，让 steam_tool 返回 frontend_action
+# 交给插件前端用 SteamClient 执行，以避开 steam:// 确认弹窗。但前端执行只在
+# Quick Access 面板挂载且 poll 循环存活时才发生——游戏模式下面板一收起，
+# React 组件 unmount、轮询停止，事件没人接，游戏纹丝不动（桌面常开面板时正常，
+# 游戏模式时失败，正是这个原因）。后端路径是同步的、不依赖前端 UI 生命周期，
+# 且自带 reaper SteamLaunch AppId= 进程校验，可靠得多。
+#
+# 如需切回前端方案，设环境变量 DECKMIND_FRONTEND_LAUNCH=1 即可（机制仍保留）。
 
 try:
     import decky

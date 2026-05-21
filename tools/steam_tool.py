@@ -42,9 +42,26 @@ _GAME_REGISTRY: dict[str, str] = {
 }
 
 
+def _steam_bin() -> str | None:
+    """Locate the `steam` launcher.
+
+    PATH first, then SteamOS's known locations — under plugin_loader.service
+    the PATH is minimal, so relying on `which` alone would make us think
+    Steam isn't installed and fall back to the dev-mock branch (a silent
+    no-op on a real Deck).
+    """
+    on_path = shutil.which("steam")
+    if on_path:
+        return on_path
+    for cand in ("/usr/bin/steam", "/usr/local/bin/steam"):
+        if os.path.exists(cand) and os.access(cand, os.X_OK):
+            return cand
+    return None
+
+
 def _has_steam() -> bool:
-    """Return True if a `steam` binary is available on PATH."""
-    return shutil.which("steam") is not None
+    """Return True if a `steam` launcher can be located."""
+    return _steam_bin() is not None
 
 
 def _resolve_app_id(game_name: str) -> tuple[str | None, str | None]:
@@ -120,8 +137,9 @@ async def launch_game(game_name: str) -> dict[str, Any]:
     steam_was_running = await _steam_running()
     existing_pids = set(await _processes_for_appid(app_id))
 
+    steam_bin = _steam_bin() or "steam"
     proc = await asyncio.create_subprocess_exec(
-        "steam", f"steam://rungameid/{app_id}",
+        steam_bin, f"steam://rungameid/{app_id}",
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
         env=_session_env(),
@@ -367,7 +385,7 @@ async def install_game(game_name: str, confirm: bool = False) -> dict[str, Any]:
                 "note": "steam binary not found; pretending to open install dialog"}
 
     proc = await asyncio.create_subprocess_exec(
-        "steam", f"steam://install/{app_id}",
+        _steam_bin() or "steam", f"steam://install/{app_id}",
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
         env=_session_env(),
@@ -404,7 +422,7 @@ async def uninstall_game(game_name: str, confirm: bool = False) -> dict[str, Any
                 "note": "steam binary not found; pretending to open uninstall dialog"}
 
     proc = await asyncio.create_subprocess_exec(
-        "steam", f"steam://uninstall/{app_id}",
+        _steam_bin() or "steam", f"steam://uninstall/{app_id}",
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
         env=_session_env(),
