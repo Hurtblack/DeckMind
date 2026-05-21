@@ -206,11 +206,6 @@ class RuntimeInstaller:
         `libssl.so.3: version 'OPENSSL_3.x.0' not found`）。
 
         这里把 PyInstaller 相关的环境变量全部移除，让子进程使用系统默认库。
-
-        另外把 HOME 指向 deck 用户家目录：插件以 root 运行时 HOME=/root，git 会
-        读不到 deck 用户 ~/.gitconfig 里配置的 GitHub 镜像/代理（国内常见），导致
-        root 直连 github.com 卡死而 deck 用户终端却秒过。同时让 pip/uv 的缓存也落
-        在 deck 家目录，避免写出 root-owned 文件。
         """
         env = os.environ.copy()
         for key in (
@@ -222,7 +217,6 @@ class RuntimeInstaller:
             "_MEIPASS2",
         ):
             env.pop(key, None)
-        env["HOME"] = str(_deck_user_home())
         return env
 
     def _run_git(self, args: list[str], cwd: Path | None = None) -> str:
@@ -235,17 +229,12 @@ class RuntimeInstaller:
         git_env = self._clean_env()
         git_env.setdefault("GIT_HTTP_LOW_SPEED_LIMIT", "1000")
         git_env.setdefault("GIT_HTTP_LOW_SPEED_TIME", str(GIT_TIMEOUT))
-        # 没有 tty 时绝不阻塞在凭据提示符上——直接失败，避免“卡住”假象。
-        git_env["GIT_TERMINAL_PROMPT"] = "0"
 
         last_err = ""
         for attempt in range(1, GIT_RETRIES + 1):
             try:
                 result = subprocess.run(
-                    # safe.directory=*：root 跑 deck 用户拥有的仓库时，新版 git
-                    # 会以“dubious ownership”拒绝操作；这里显式放行。
-                    ["git", "-c", "safe.directory=*",
-                     "-c", "http.postBuffer=524288000", *args],
+                    ["git", "-c", "http.postBuffer=524288000", *args],
                     cwd=str(cwd) if cwd else None,
                     capture_output=True,
                     text=True,

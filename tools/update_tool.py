@@ -41,25 +41,13 @@ def _clean_env() -> dict[str, str]:
     for key in ("LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONHOME",
                 "PYTHONPATH", "_MEIPASS", "_MEIPASS2"):
         env.pop(key, None)
-    # Point HOME at the desktop user's home: under Decky the backend runs as
-    # root (HOME=/root), so git can't see the deck user's ~/.gitconfig — which
-    # often holds the GitHub mirror/proxy needed on restricted networks. Without
-    # it, root's git hits github.com directly and stalls until timeout, while
-    # the same pull works instantly in the user's terminal.
-    deck_home = os.environ.get("DECKY_USER_HOME")
-    if deck_home:
-        env["HOME"] = deck_home
-    # Never block on a credential prompt when there's no tty.
-    env["GIT_TERMINAL_PROMPT"] = "0"
     return env
 
 
 async def _git(*args: str) -> tuple[int, str, str]:
     """Run a git command inside the project directory."""
     proc = await asyncio.create_subprocess_exec(
-        # safe.directory=*: root operating on a deck-owned repo would otherwise
-        # be refused with "dubious ownership".
-        "git", "-c", "safe.directory=*", *args,
+        "git", *args,
         cwd=str(_PROJECT_DIR),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
