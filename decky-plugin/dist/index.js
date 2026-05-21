@@ -616,9 +616,13 @@ function Content() {
             const latest = await refresh();
             if (result.ok) {
                 const commit = latest?.commit ?? null;
-                appendMessage("assistant", isUpdate
-                    ? `Runtime 已更新${commit ? ` 到 ${commit}` : ""}`
-                    : `Runtime 已安装到 ${result.runtime_dir ?? "本机目录"}`);
+                const deps = result.deps;
+                const depsFailed = deps && deps.ok === false;
+                appendMessage(depsFailed ? "system" : "assistant", depsFailed
+                    ? `Runtime 代码已更新${commit ? ` 到 ${commit}` : ""}，但依赖安装失败：${deps.error ?? "未知错误"}`
+                    : isUpdate
+                        ? `Runtime 已更新${commit ? ` 到 ${commit}` : ""}`
+                        : `Runtime 已安装到 ${result.runtime_dir ?? "本机目录"}`);
                 // 插件本体同步结果
                 const plugin = result.plugin;
                 if (plugin?.ok && plugin.files) {

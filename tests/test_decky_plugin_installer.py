@@ -116,6 +116,62 @@ class DeckyPluginInstallerTests(unittest.TestCase):
             self.assertGreaterEqual(fix_permissions.call_count, 2)
             self.assertEqual(copied_text, "print('new')\n")
 
+    def test_install_syncs_plugin_before_dependency_install(self) -> None:
+        module = load_installer_module()
+        with tempfile.TemporaryDirectory() as root:
+            runtime_dir = Path(root) / "runtime"
+            (runtime_dir / ".git").mkdir(parents=True)
+            installer = module.RuntimeInstaller(
+                runtime_dir=runtime_dir,
+                cache_dir=Path(root) / "cache",
+            )
+            order: list[str] = []
+
+            def fake_sync_plugin() -> dict[str, object]:
+                order.append("plugin")
+                return {"ok": True, "files": 3}
+
+            def fake_install_deps() -> dict[str, object]:
+                order.append("deps")
+                return {"ok": False, "error": "pip failed"}
+
+            with (
+                patch.object(installer, "_run_git"),
+                patch.object(installer, "_git_commit", return_value="abc123"),
+                patch.object(installer, "_fix_permissions"),
+                patch.object(installer, "_sync_plugin", side_effect=fake_sync_plugin),
+                patch.object(installer, "_install_python_deps", side_effect=fake_install_deps),
+            ):
+                result = installer.install()
+
+        self.assertEqual(order, ["plugin", "deps"])
+        self.assertEqual(result["plugin"], {"ok": True, "files": 3})
+        self.assertEqual(result["deps"], {"ok": False, "error": "pip failed"})
+
+    def test_dependency_failure_hint_does_not_include_abi_flag(self) -> None:
+        module = load_installer_module()
+        with tempfile.TemporaryDirectory() as root:
+            runtime_dir = Path(root) / "runtime"
+            runtime_dir.mkdir()
+            (runtime_dir / "requirements.txt").write_text("openai\n", encoding="utf-8")
+            installer = module.RuntimeInstaller(
+                runtime_dir=runtime_dir,
+                cache_dir=Path(root) / "cache",
+            )
+
+            with (
+                patch.object(installer, "_decky_python_version", return_value=(3, 11)),
+                patch.object(installer, "_find_matching_python", return_value=None),
+                patch.object(installer, "_find_system_python", return_value="python3"),
+                patch.object(installer, "_probe_python", return_value=(3, 13)),
+                patch.object(installer, "_pip_install_to_vendor", return_value=(False, "pip failed")),
+            ):
+                result = installer._install_python_deps()
+
+        self.assertFalse(result["ok"])
+        self.assertIn("--platform manylinux2014_x86_64", result["error"])
+        self.assertNotIn("--abi", result["error"])
+
 
 if __name__ == "__main__":
     unittest.main()

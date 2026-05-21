@@ -581,7 +581,7 @@ class RuntimeInstaller:
                 f"或:\n"
                 f"  python3 -m pip install --target {vendor} \\\n"
                 f"    --python-version {decky_ver_str} --platform manylinux2014_x86_64 \\\n"
-                f"    --only-binary :all: --abi cp{decky_ver[0]}{decky_ver[1]} \\\n"
+                f"    --only-binary :all: \\\n"
                 f"    -r {req_file}\n"
                 f"最后一次 pip 输出:\n{msg}"
             ),
@@ -621,6 +621,16 @@ class RuntimeInstaller:
             )
             self._emit("git", "ok", "克隆代码完成")
 
+        self._fix_permissions()
+
+        # 顺带把 plugin 本体（含 dist/index.js）同步到最新——
+        # runtime 是整个仓库的 clone，含 decky-plugin/ 子目录。
+        #
+        # 这里必须放在依赖安装前：如果当前正在运行的是旧 installer，
+        # deps 阶段可能仍因旧 pip 逻辑失败；但 plugin 文件已经能先更新，
+        # 用户重载 Decky 后下一次安装/更新就会使用新 installer.py。
+        plugin_result = self._sync_plugin()
+
         deps_result = self._install_python_deps()
 
         commit = self._git_commit() or "unknown"
@@ -630,6 +640,7 @@ class RuntimeInstaller:
             "branch": self.branch,
             "action": action,
             "deps": deps_result,
+            "plugin": plugin_result,
         }
         self.manifest_path.write_text(
             json.dumps(manifest, indent=2), encoding="utf-8"
@@ -637,10 +648,6 @@ class RuntimeInstaller:
         self._emit("manifest", "ok", f"已写入 {self.manifest_path.name}")
 
         self._fix_permissions()
-
-        # 顺带把 plugin 本体（含 dist/index.js）同步到最新——
-        # runtime 是整个仓库的 clone，含 decky-plugin/ 子目录。
-        plugin_result = self._sync_plugin()
 
         return {
             "ok": True,
