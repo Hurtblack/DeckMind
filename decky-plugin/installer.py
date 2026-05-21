@@ -206,6 +206,11 @@ class RuntimeInstaller:
         `libssl.so.3: version 'OPENSSL_3.x.0' not found`）。
 
         这里把 PyInstaller 相关的环境变量全部移除，让子进程使用系统默认库。
+
+        另外把 HOME 指向 deck 用户家目录：插件以 root 运行时 HOME=/root，git 会
+        读不到 deck 用户 ~/.gitconfig 里配置的 GitHub 镜像/代理（国内常见），导致
+        root 直连 github.com 卡死而 deck 用户终端却秒过。同时让 pip/uv 的缓存也落
+        在 deck 家目录，避免写出 root-owned 文件。
         """
         env = os.environ.copy()
         for key in (
@@ -217,6 +222,7 @@ class RuntimeInstaller:
             "_MEIPASS2",
         ):
             env.pop(key, None)
+        env["HOME"] = str(_deck_user_home())
         return env
 
     def _run_git(self, args: list[str], cwd: Path | None = None) -> str:
@@ -229,12 +235,17 @@ class RuntimeInstaller:
         git_env = self._clean_env()
         git_env.setdefault("GIT_HTTP_LOW_SPEED_LIMIT", "1000")
         git_env.setdefault("GIT_HTTP_LOW_SPEED_TIME", str(GIT_TIMEOUT))
+        # 没有 tty 时绝不阻塞在凭据提示符上——直接失败，避免“卡住”假象。
+        git_env["GIT_TERMINAL_PROMPT"] = "0"
 
         last_err = ""
         for attempt in range(1, GIT_RETRIES + 1):
             try:
                 result = subprocess.run(
-                    ["git", "-c", "http.postBuffer=524288000", *args],
+                    # safe.directory=*：root 跑 deck 用户拥有的仓库时，新版 git
+                    # 会以“dubious ownership”拒绝操作；这里显式放行。
+                    ["git", "-c", "safe.directory=*",
+                     "-c", "http.postBuffer=524288000", *args],
                     cwd=str(cwd) if cwd else None,
                     capture_output=True,
                     text=True,
@@ -503,6 +514,51 @@ class RuntimeInstaller:
                 shutil.copy2(item, target)
         return True, f"已复制 site-packages → {vendor}"
 
+    def _find_uv(self) -> str | None:
+        """定位 uv 可执行文件。
+
+        uv 是 DeckMind CLI 的依赖，由 install.sh 装到 deck 用户的家目录。但
+        插件以 root 运行，PATH 里通常没有，所以显式探测 deck 家目录下的常见位置。
+        """
+        on_path = shutil.which("uv")
+        if on_path:
+            return on_path
+        home = _deck_user_home()
+        for cand in (home / ".local" / "bin" / "uv",
+                     home / ".cargo" / "bin" / "uv",
+                     Path("/usr/bin/uv"), Path("/usr/local/bin/uv")):
+            if cand.exists() and os.access(cand, os.X_OK):
+                return str(cand)
+        return None
+
+    def _uv_install_to_vendor(
+        self, uv_bin: str, vendor: Path, req_file: Path,
+        decky_ver: tuple[int, int], stage: str,
+    ) -> tuple[bool, str]:
+        """用 uv 把依赖跨版本装到 vendor，ABI 匹配 Decky Python。
+
+        uv 是独立二进制，不依赖系统 pip，也不受 PEP 668 限制，并能为指定
+        Python 版本/平台解析正确的 manylinux wheel（含 pydantic_core 的 C 扩展）。
+        这一步成功就彻底绕开了系统 pip / venv / ensurepip 那一整套脆弱链路。
+        """
+        major, minor = decky_ver
+        cmd = [
+            uv_bin, "pip", "install",
+            "--target", str(vendor),
+            "--python-version", f"{major}.{minor}",
+            "--python-platform", "x86_64-manylinux2014",
+            "--only-binary", ":all:",
+            "-r", str(req_file),
+        ]
+        rc, output = self._run_streaming(
+            cmd, stage=stage, timeout=PIP_TIMEOUT, env=self._clean_env(),
+        )
+        if rc == 124:
+            return False, f"uv install 超时（{PIP_TIMEOUT}s）\n{output}"
+        if rc != 0:
+            return False, output
+        return True, output
+
     def _install_python_deps(self) -> dict[str, Any]:
         """把 requirements.txt 装到 runtime/.vendor，全自动选对 wheel。
 
@@ -514,6 +570,8 @@ class RuntimeInstaller:
 
         策略（每步失败自动回退到下一步，返回结构化日志方便排错）：
 
+          U. uv（首选）：独立二进制，不依赖系统 pip / venv，直接为目标 Python
+             版本跨平台解析正确 wheel。绕开下面 A/B/C 全部环境坑。
           A. 系统装了与 Decky 同版本的 Python（如 /usr/bin/python3.11）
              → 用它的 pip --target，ABI 天然匹配
           B. 没同版本，但任何系统 Python 都行 → 用 pip 的跨版本能力
@@ -545,6 +603,19 @@ class RuntimeInstaller:
                 "ok" if ok else "fail",
                 "" if ok else msg.splitlines()[-1][:200] if msg else "",
             )
+
+        # ---------- Strategy U: uv (preferred) ----------
+        uv_bin = self._find_uv()
+        if uv_bin:
+            self._emit("deps.U", "try", f"用 uv 跨版本安装: {uv_bin}")
+            ok, msg = self._uv_install_to_vendor(
+                uv_bin, vendor, req_file, decky_ver, stage="deps.U")
+            attempt("uv", ok, msg, {"uv": uv_bin})
+            if ok:
+                return {"ok": True, "vendor": str(vendor), "via": "uv",
+                        "decky_python": decky_ver_str, "attempts": attempts}
+        else:
+            self._emit("deps.U", "skip", "未找到 uv，回退到系统 pip 路径")
 
         # ---------- Strategy A: matching system Python ----------
         matched = self._find_matching_python(decky_ver)
