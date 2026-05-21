@@ -126,3 +126,134 @@ async def set_volume(percent: int) -> dict[str, Any]:
         return await _verify_volume(percent, "amixer")
 
     return {"ok": False, "error": "no supported audio backend (wpctl/amixer)"}
+
+
+# ---------- output device routing ----------
+#
+# Uses `pactl` (PipeWire's PulseAudio shim, default on SteamOS 3). pactl
+# exposes stable sink Names plus human Descriptions, which parse far more
+# cleanly than `wpctl status`. Switching is a per-user session operation, so
+# the shared session_env() is essential — under plugin_loader.service the
+# command otherwise can't reach the user's PipeWire socket and silently
+# no-ops, hence the read-back verification below.
+
+
+def parse_sinks(list_output: str) -> list[dict[str, str]]:
+    """Parse `pactl list sinks` into [{name, description, state}]."""
+    sinks: list[dict[str, str]] = []
+    current: dict[str, str] | None = None
+    for raw in list_output.splitlines():
+        line = raw.strip()
+        if line.startswith("Sink #"):
+            if current is not None:
+                sinks.append(current)
+            current = {"name": "", "description": "", "state": ""}
+        elif current is not None:
+            if line.startswith("Name:"):
+                current["name"] = line.split(":", 1)[1].strip()
+            elif line.startswith("Description:"):
+                current["description"] = line.split(":", 1)[1].strip()
+            elif line.startswith("State:"):
+                current["state"] = line.split(":", 1)[1].strip()
+    if current is not None:
+        sinks.append(current)
+    return sinks
+
+
+def match_sink(target: str, sinks: list[dict[str, str]]) -> str | None:
+    """Resolve a user-supplied string to exactly one sink Name.
+
+    Exact Name match wins; otherwise a case-insensitive substring of either
+    Name or Description, but only if it's unambiguous. Returns None when no
+    match or more than one matches.
+    """
+    target_l = target.strip().lower()
+    for sink in sinks:
+        if sink["name"].lower() == target_l:
+            return sink["name"]
+    matches = [
+        sink["name"]
+        for sink in sinks
+        if target_l in sink["name"].lower() or target_l in sink["description"].lower()
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+async def list_outputs() -> dict[str, Any]:
+    """List audio output devices (sinks) and mark the current default."""
+    if not shutil.which("pactl"):
+        return {"ok": False, "error": "pactl not found (pipewire-pulse not installed?)"}
+
+    rc, out, err = await _run("pactl", "list", "sinks")
+    if rc != 0:
+        return {"ok": False, "error": err.strip() or "pactl list sinks failed"}
+
+    sinks = parse_sinks(out)
+    drc, dout, _ = await _run("pactl", "get-default-sink")
+    default = dout.strip() if drc == 0 else ""
+
+    devices = [
+        {
+            "name": sink["name"],
+            "description": sink["description"] or sink["name"],
+            "state": sink["state"],
+            "default": sink["name"] == default,
+        }
+        for sink in sinks
+    ]
+    return {"ok": True, "devices": devices, "default": default}
+
+
+async def set_output_device(device: str) -> dict[str, Any]:
+    """Switch the default output sink and move playing streams onto it."""
+    if not shutil.which("pactl"):
+        return {"ok": False, "error": "pactl not found (pipewire-pulse not installed?)"}
+
+    rc, out, err = await _run("pactl", "list", "sinks")
+    if rc != 0:
+        return {"ok": False, "error": err.strip() or "pactl list sinks failed"}
+
+    sinks = parse_sinks(out)
+    name = match_sink(device, sinks)
+    if name is None:
+        return {
+            "ok": False,
+            "error": "no unique sink matched",
+            "requested": device,
+            "available": [
+                {"name": sink["name"], "description": sink["description"]}
+                for sink in sinks
+            ],
+        }
+
+    rc, _, err = await _run("pactl", "set-default-sink", name)
+    if rc != 0:
+        return {"ok": False, "error": err.strip() or "pactl set-default-sink failed"}
+
+    # Setting the default only routes *new* streams; move the ones already
+    # playing so audio actually follows to the new device (what the KDE tray
+    # does after a Bluetooth connect).
+    moved = 0
+    irc, iout, _ = await _run("pactl", "list", "short", "sink-inputs")
+    if irc == 0:
+        for line in iout.splitlines():
+            input_id = line.split("\t", 1)[0].strip()
+            if input_id:
+                mrc, _, _ = await _run("pactl", "move-sink-input", input_id, name)
+                if mrc == 0:
+                    moved += 1
+
+    # rc==0 isn't trust-worthy under a broken session bus; confirm by read-back.
+    drc, dout, _ = await _run("pactl", "get-default-sink")
+    if drc != 0 or dout.strip() != name:
+        return {
+            "ok": False,
+            "requested": name,
+            "actual": dout.strip() if drc == 0 else None,
+            "error": (
+                "set-default-sink reported success but read-back disagreed — "
+                "likely the audio backend cannot reach the user session bus "
+                "(check XDG_RUNTIME_DIR / DBUS_SESSION_BUS_ADDRESS)"
+            ),
+        }
+    return {"ok": True, "default": name, "moved_streams": moved, "verified": True}

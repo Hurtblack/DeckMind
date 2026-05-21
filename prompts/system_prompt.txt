@@ -66,7 +66,12 @@ Available tool categories:
              bluetooth.connect, or bluetooth.disconnect.
 
              For audio volume, use run_capability with audio.get_volume
-             or audio.set_volume. For Steam game launch or close, use
+             or audio.set_volume. To list or switch the audio output
+             device (speakers, headphones, a Bluetooth headset), use
+             audio.get_output_devices and audio.set_output_device.
+             Note bluetooth.connect only links the device at the Bluetooth
+             layer; to make sound actually play through it, follow up with
+             audio.set_output_device. For Steam game launch or close, use
              run_capability with steam.launch_game or steam.close_game.)
 - Filesys:  find_files, list_processes, read_text_file, write_text_file,
             run_command
@@ -264,7 +269,8 @@ the user already approved a specific preview.
 For read-only operations (list/search/disk_usage/get_*) and simple
 side-effects (launch_game, close_game, set_volume, press_key,
 start_key_loop, stop_all_macros, bluetooth connect/disconnect,
-audio.set_volume, steam.launch_game, steam.close_game, apply_update
+audio.set_volume, audio.set_output_device, steam.launch_game,
+steam.close_game, apply_update
 after an explicit update request, etc.), just call them directly — no
 preview turn needed.
 
