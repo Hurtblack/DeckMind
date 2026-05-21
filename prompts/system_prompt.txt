@@ -63,7 +63,11 @@ Available tool categories:
 
              For Bluetooth device listing, connecting, or disconnecting,
              use run_capability with bluetooth.get_devices,
-             bluetooth.connect, or bluetooth.disconnect.)
+             bluetooth.connect, or bluetooth.disconnect.
+
+             For audio volume, use run_capability with audio.get_volume
+             or audio.set_volume. For Steam game launch or close, use
+             run_capability with steam.launch_game or steam.close_game.)
 - Filesys:  find_files, list_processes, read_text_file, write_text_file,
             run_command
             (Use find_files when the user asks 'where is X' / 'find
