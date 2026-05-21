@@ -345,6 +345,47 @@ class RuntimeInstaller:
             self._emit("deps.python_probe", "skip", f"{candidate} 不可用")
         return None
 
+    def _run_streaming(
+        self, cmd: list[str], stage: str, timeout: int,
+        env: dict[str, str] | None = None,
+    ) -> tuple[int, str]:
+        """跑命令并把 stdout 逐行 emit 到 UI（解决长任务静默看着像死了）。
+
+        看门狗线程在 timeout 后 kill 进程：即使子进程毫无输出地挂住，管道也会
+        被关掉、for 循环退出，所以不会真正卡死。返回 (returncode, 合并输出)；
+        超时返回 returncode=124。
+        """
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1, env=env,
+        )
+        timed_out = {"v": False}
+
+        def _kill() -> None:
+            timed_out["v"] = True
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+        timer = threading.Timer(timeout, _kill)
+        timer.start()
+        lines: list[str] = []
+        try:
+            assert proc.stdout is not None
+            for raw in proc.stdout:
+                line = raw.rstrip()
+                if line:
+                    lines.append(line)
+                    self._emit(stage, "info", line[:200])
+            proc.wait()
+        finally:
+            timer.cancel()
+
+        if timed_out["v"]:
+            return 124, "\n".join(lines)
+        return proc.returncode, "\n".join(lines)
+
     def _pip_install_to_vendor(
         self,
         pip_python: str,
@@ -352,6 +393,7 @@ class RuntimeInstaller:
         req_file: Path,
         *,
         target_version: tuple[int, int] | None = None,
+        stage: str = "deps.pip",
     ) -> tuple[bool, str]:
         """用指定 Python 跑 pip install --target。
 
@@ -381,19 +423,14 @@ class RuntimeInstaller:
                     "--platform", "manylinux2014_x86_64",
                     "--only-binary", ":all:",
                 ]
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=PIP_TIMEOUT,
-                env=self._clean_env(),
-            )
-        except subprocess.TimeoutExpired:
-            return False, f"pip install 超时（{PIP_TIMEOUT}s）"
-        if result.returncode != 0:
-            return False, (result.stderr.strip() or result.stdout.strip())
-        return True, result.stdout
+        rc, output = self._run_streaming(
+            cmd, stage=stage, timeout=PIP_TIMEOUT, env=self._clean_env(),
+        )
+        if rc == 124:
+            return False, f"pip install 超时（{PIP_TIMEOUT}s）\n{output}"
+        if rc != 0:
+            return False, output
+        return True, output
 
     def _ensure_venv_python(self, system_python: str) -> tuple[str | None, str]:
         """创建/复用 venv，返回 (venv 内的 python 路径, 日志)。
@@ -514,7 +551,8 @@ class RuntimeInstaller:
         if matched:
             self._emit("deps.A", "try",
                        f"找到系统 Python {decky_ver_str}: {matched}")
-            ok, msg = self._pip_install_to_vendor(matched, vendor, req_file)
+            ok, msg = self._pip_install_to_vendor(
+                matched, vendor, req_file, stage="deps.A")
             attempt(f"system_python{decky_ver_str}", ok, msg, {"python": matched})
             if ok:
                 return {"ok": True, "vendor": str(vendor),
@@ -547,6 +585,7 @@ class RuntimeInstaller:
                    f"{decky_ver_str} 的预编译 wheel")
         ok, msg = self._pip_install_to_vendor(
             any_python, vendor, req_file, target_version=decky_ver,
+            stage="deps.B",
         )
         attempt(f"cross_version_pip(host={any_ver_str},target={decky_ver_str})",
                 ok, msg, {"python": any_python})
@@ -575,6 +614,7 @@ class RuntimeInstaller:
                 }
             ok, msg = self._pip_install_to_vendor(
                 venv_python, vendor, req_file, target_version=decky_ver,
+                stage="deps.C",
             )
             attempt(f"venv_cross_version(target={decky_ver_str})", ok, msg,
                     {"venv_python": venv_python, "venv_log": venv_log})
