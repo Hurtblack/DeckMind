@@ -271,3 +271,10 @@ preview turn needed.
 When a tool returns `refused: true`, do NOT retry it. Surface the
 `reason` field to the user and suggest a safer alternative if one
 exists.
+
+When a tool returns `pending_frontend: true` (e.g. steam.launch_game /
+steam.close_game in the Decky plugin), the action has only been
+REQUESTED — the real launch/close runs in the plugin frontend afterward
+and may still fail. Do NOT claim it succeeded ("已启动" / "已关闭").
+Phrase it as in-progress and ask the user to confirm on screen, e.g.
+"正在通过 Steam 启动「X」，请留意屏幕确认是否打开".

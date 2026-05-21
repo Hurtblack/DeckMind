@@ -299,6 +299,19 @@ function runFrontendAction(action: FrontendAction): string {
     return "✗ 缺少 app_id / game_id，无法启动";
   }
   const label = action.game ?? gameId;
+  // [DECKMIND-DIAG] 临时诊断：定位 "Unknown method" 报错来源。确认后删除。
+  try {
+    console.log("[DeckMind] runFrontendAction", {
+      type: action.type,
+      gameId,
+      appsKeys: Object.keys(apps),
+      RunGameType: typeof (apps as Record<string, unknown>).RunGame,
+      RunGameSrc: String((apps as Record<string, unknown>).RunGame).slice(0, 300),
+      TerminateAppType: typeof (apps as Record<string, unknown>).TerminateApp,
+    });
+  } catch (diagErr) {
+    console.log("[DeckMind] diag dump failed", diagErr);
+  }
   try {
     if (action.type === "run_game") {
       const run = apps.RunGame as
@@ -322,7 +335,17 @@ function runFrontendAction(action: FrontendAction): string {
     }
     return `✗ 未知前端动作：${action.type}`;
   } catch (e) {
-    return `✗ 调用 SteamClient 失败：${String(e)}`;
+    // [DECKMIND-DIAG] 把完整 error 打到控制台（含 message / stack），
+    // String(e) 只能拿到首行。确认后删除。
+    const err = e as { name?: string; message?: string; stack?: string };
+    console.error("[DeckMind] SteamClient call threw", {
+      name: err?.name,
+      message: err?.message,
+      stack: err?.stack,
+      raw: e,
+    });
+    const detail = err?.message ?? String(e);
+    return `✗ 调用 SteamClient 失败：${detail}`;
   }
 }
 

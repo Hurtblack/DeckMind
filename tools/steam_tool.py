@@ -94,12 +94,20 @@ async def launch_game(game_name: str) -> dict[str, Any]:
 
     # Decky 环境：交给前端 SteamClient 启动，避免 steam:// 确认弹窗。
     if _frontend_launch_enabled():
+        # NOTE: we have NOT launched anything yet — the actual
+        # SteamClient.Apps.RunGame call happens in the plugin frontend
+        # after it sees this frontend_action, and its result is not fed
+        # back into this turn. So this is a *request*, not a confirmed
+        # launch. Do not let the model assert the game is running.
         return {
             "ok": True,
+            "pending_frontend": True,
             "game": key,
             "app_id": app_id,
             "frontend_action": {"type": "run_game", "app_id": app_id, "game": key},
-            "note": "已请求 Steam 内部启动（前端 SteamClient，无确认弹窗）。",
+            "note": ("已向 Steam 发出启动请求（前端 SteamClient）。尚未确认游戏"
+                     "真正打开——可能失败。请告诉用户『正在启动，请留意屏幕确认』，"
+                     "不要断言已经启动成功。"),
         }
 
     if not _has_steam():
@@ -306,13 +314,16 @@ async def close_game(process_name: str) -> dict[str, Any]:
         if app_id is not None:
             return {
                 "ok": True,
+                "pending_frontend": True,
                 "game": resolved or name,
                 "app_id": app_id,
                 "frontend_action": {
                     "type": "terminate_game", "app_id": app_id,
                     "game": resolved or name,
                 },
-                "note": "已请求 Steam 内部关闭（前端 SteamClient）。",
+                "note": ("已向 Steam 发出关闭请求（前端 SteamClient）。尚未确认游戏"
+                         "真正关闭——可能失败。请告诉用户『正在关闭，请留意屏幕确认』，"
+                         "不要断言已经关闭成功。"),
             }
         # 解析不到 appid（可能是非 Steam 进程），继续走 pkill。
 
