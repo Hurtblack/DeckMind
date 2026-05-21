@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 def load_installer_module():
@@ -48,6 +49,72 @@ class DeckyPluginInstallerTests(unittest.TestCase):
 
         self.assertTrue(status["installed"])
         self.assertEqual(status["version"], "0.2.0")
+
+    def test_sync_plugin_repairs_permissions_before_copy_when_root(self) -> None:
+        module = load_installer_module()
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            runtime_plugin = root_path / "runtime" / "decky-plugin"
+            runtime_plugin.mkdir(parents=True)
+            (runtime_plugin / "main.py").write_text("print('new')\n", encoding="utf-8")
+            plugin_dir = root_path / "homebrew" / "plugins" / "DeckMind"
+            plugin_dir.mkdir(parents=True)
+            module.__file__ = str(plugin_dir / "installer.py")
+            resolved_plugin_dir = plugin_dir.resolve(strict=False)
+
+            installer = module.RuntimeInstaller(
+                runtime_dir=root_path / "runtime",
+                cache_dir=root_path / "cache",
+            )
+
+            with (
+                patch.object(installer, "_fix_plugin_dir_permissions", create=True) as fix_permissions,
+                patch.object(module.os, "getuid", return_value=0),
+            ):
+                result = installer._sync_plugin()
+
+        self.assertTrue(result["ok"])
+        fix_permissions.assert_called_once_with(resolved_plugin_dir)
+
+    def test_sync_plugin_retries_copy_after_permission_repair(self) -> None:
+        module = load_installer_module()
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            runtime_plugin = root_path / "runtime" / "decky-plugin"
+            runtime_plugin.mkdir(parents=True)
+            source_file = runtime_plugin / "main.py"
+            source_file.write_text("print('new')\n", encoding="utf-8")
+            plugin_dir = root_path / "homebrew" / "plugins" / "DeckMind"
+            plugin_dir.mkdir(parents=True)
+            module.__file__ = str(plugin_dir / "installer.py")
+            resolved_plugin_dir = plugin_dir.resolve(strict=False)
+
+            installer = module.RuntimeInstaller(
+                runtime_dir=root_path / "runtime",
+                cache_dir=root_path / "cache",
+            )
+            copy_calls = 0
+
+            def flaky_copy(src: Path, target: Path) -> None:
+                nonlocal copy_calls
+                copy_calls += 1
+                if copy_calls == 1:
+                    raise OSError("permission denied")
+                target.write_text(Path(src).read_text(encoding="utf-8"), encoding="utf-8")
+
+            with (
+                patch.object(installer, "_fix_plugin_dir_permissions", create=True) as fix_permissions,
+                patch.object(module.shutil, "copy2", side_effect=flaky_copy),
+                patch.object(module.os, "getuid", return_value=0),
+            ):
+                result = installer._sync_plugin()
+                copied_text = (resolved_plugin_dir / "main.py").read_text(encoding="utf-8")
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["files"], 1)
+            self.assertEqual(copy_calls, 2)
+            self.assertGreaterEqual(fix_permissions.call_count, 2)
+            self.assertEqual(copied_text, "print('new')\n")
 
 
 if __name__ == "__main__":

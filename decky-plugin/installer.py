@@ -653,6 +653,47 @@ class RuntimeInstaller:
             "plugin": plugin_result,
         }
 
+    def _fix_plugin_dir_permissions(self, plugin_dir: Path) -> dict[str, Any]:
+        """Best-effort chown for the active Decky plugin directory.
+
+        Decky normally runs the backend as root, so it can repair files that
+        were previously written as root-owned. In non-root contexts this is a
+        no-op; we do not shell out to sudo from the plugin.
+        """
+        if os.getuid() != 0:
+            return {"ok": True, "skipped": "not_root"}
+        try:
+            import pwd
+            target = _deck_user()
+            pw = pwd.getpwnam(target)
+            uid, gid = pw.pw_uid, pw.pw_gid
+            if uid == 0:
+                return {"ok": True, "skipped": "target_is_root"}
+        except (KeyError, ImportError) as e:
+            return {"ok": False, "error": f"cannot resolve deck user: {e}"}
+
+        changed = 0
+        failed: list[str] = []
+        paths = [plugin_dir]
+        if plugin_dir.exists():
+            for root, dirs, files in os.walk(str(plugin_dir)):
+                paths.extend(Path(root) / name for name in dirs + files)
+
+        for path in paths:
+            try:
+                os.chown(str(path), uid, gid)
+                changed += 1
+            except OSError as e:
+                failed.append(f"{path} ({e})")
+
+        if failed and changed == 0:
+            return {"ok": False, "changed": changed, "failed": failed[:10]}
+        return {
+            "ok": True,
+            "changed": changed,
+            "failed": failed[:10] if failed else [],
+        }
+
     def _sync_plugin(self) -> dict[str, Any]:
         """把 runtime 仓库里的 decky-plugin/ 同步到当前 plugin 目录。
 
@@ -671,6 +712,10 @@ class RuntimeInstaller:
             return {"ok": False, "skipped": "runtime 内无 decky-plugin 目录"}
         if src.resolve() == dst.resolve():
             return {"ok": True, "skipped": "plugin 目录与源相同，无需同步"}
+
+        permission_repairs: list[dict[str, Any]] = []
+        first_repair = self._fix_plugin_dir_permissions(dst)
+        permission_repairs.append(first_repair)
 
         # 只同步运行所需文件，跳过开发用目录
         skip_dirs = {"node_modules", "src", "scripts", "__pycache__", ".git"}
@@ -693,14 +738,17 @@ class RuntimeInstaller:
                     continue
                 target = target_dir / name
                 try:
-                    # 先删旧文件再写：只要目录归 deck，就能替换掉残留的
-                    # root 属主文件（Linux 删除看目录写权限，不看文件本身）。
-                    if target.exists() or target.is_symlink():
-                        target.unlink()
-                    shutil.copy2(Path(root) / name, target)
+                    source = Path(root) / name
+                    self._copy_plugin_file(source, target)
                     copied.append(str(rel / name))
                 except OSError as e:
-                    failed.append(f"{rel / name} ({e})")
+                    repair = self._fix_plugin_dir_permissions(dst)
+                    permission_repairs.append(repair)
+                    try:
+                        self._copy_plugin_file(source, target)
+                        copied.append(str(rel / name))
+                    except OSError as retry_error:
+                        failed.append(f"{rel / name} ({retry_error})")
 
         if failed and not copied:
             return {
@@ -721,8 +769,16 @@ class RuntimeInstaller:
             "plugin_dir": str(dst),
             "files": len(copied),
             "failed": failed[:10] if failed else [],
+            "permission_repairs": permission_repairs,
             "note": note,
         }
+
+    def _copy_plugin_file(self, source: Path, target: Path) -> None:
+        # 先删旧文件再写：只要目录归 deck，就能替换掉残留的 root 属主文件。
+        # Linux 删除看目录写权限，不看文件本身。
+        if target.exists() or target.is_symlink():
+            target.unlink()
+        shutil.copy2(source, target)
 
     async def install_async(self) -> dict[str, Any]:
         """从 async 上下文安全调用，不阻塞 Decky 事件循环。
