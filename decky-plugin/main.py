@@ -82,6 +82,9 @@ class Plugin:
     async def install_runtime(self) -> dict:
         return await INSTALLER.install_async()
 
+    async def reset_session(self, messages: list[dict] | None = None) -> dict:
+        return self.runtime.reset_session(messages or [])
+
     async def get_install_progress(self, since: int = 0) -> dict:
         """前端在 install_runtime 运行期间轮询，拿到自 `since` 以后的事件。
 

@@ -124,6 +124,7 @@ const formatInstallEvent = (e) => {
 const startTurn = callable("start_turn");
 const getTurn = callable("get_turn");
 const answerPermission = callable("answer_permission");
+const resetSession = callable("reset_session");
 const colors = {
     panel: "rgba(20, 23, 28, 0.72)",
     border: "rgba(255, 255, 255, 0.12)",
@@ -693,10 +694,23 @@ function Content() {
             setBusy(false);
         }
     };
-    const clearHistory = () => {
+    const clearHistory = async () => {
+        const currentMessages = messages;
         setMessages(status
             ? [{ id: nextId(), role: "assistant", text: welcomeMessageForStatus(status) }]
             : []);
+        setPermissionRequest(null);
+        setActiveTurnId(null);
+        seenEventCountRef.current = 0;
+        try {
+            const result = await resetSession(currentMessages);
+            if (result.remembered && result.remembered.length > 0) {
+                appendMessage("system", `已开启新对话，并更新 ${result.remembered.length} 条长期偏好记忆。`);
+            }
+        }
+        catch (error) {
+            appendMessage("system", `新对话已清空界面历史，但后端重置失败：${String(error)}`);
+        }
     };
     const canSend = SP_REACT.useMemo(() => Boolean(status?.installed) && draft.trim().length > 0 && !busy, [busy, draft, status?.installed]);
     // 未安装时强制显示（引导安装）；已安装时跟随配置面板展开，方便点"更新 Runtime"
@@ -709,7 +723,7 @@ function Content() {
                     display: "flex",
                     alignItems: "stretch",
                     gap: 6,
-                }, children: [SP_JSX.jsxs("div", { role: "button", tabIndex: 0, onClick: clearHistory, title: "\u6E05\u7A7A\u5BF9\u8BDD\u5386\u53F2", "aria-label": "\u6E05\u7A7A\u5BF9\u8BDD\u5386\u53F2", style: {
+                }, children: [SP_JSX.jsxs("div", { role: "button", tabIndex: 0, onClick: () => void clearHistory(), title: "\u5F00\u542F\u65B0\u5BF9\u8BDD", "aria-label": "\u5F00\u542F\u65B0\u5BF9\u8BDD", style: {
                             alignItems: "center",
                             background: "rgba(255, 123, 114, 0.09)",
                             border: "1px solid rgba(255, 123, 114, 0.25)",
@@ -721,7 +735,7 @@ function Content() {
                             fontWeight: 600,
                             gap: 4,
                             padding: "0 10px",
-                        }, children: [SP_JSX.jsx(FaTrash, { size: 11 }), "\u6E05\u7A7A"] }), SP_JSX.jsx("div", { style: { flex: 1 }, children: SP_JSX.jsx(StatusBar, { busy: busy, config: config, configOpen: configOpen, onRefresh: () => void refresh(), onToggleConfig: () => setConfigOpen((open) => !open), status: status }) })] }), shouldShowRuntimeCard && (SP_JSX.jsx(RuntimeCard, { busy: busy, onInstall: () => void runInstall(false), onUpdate: () => void runInstall(true), onRefresh: () => void refresh(), status: status })), (!config?.has_api_key || configOpen) && (SP_JSX.jsx(ConfigCard, { busy: busy, config: config, onSaved: (saved) => {
+                        }, children: [SP_JSX.jsx(FaTrash, { size: 11 }), "\u65B0\u5BF9\u8BDD"] }), SP_JSX.jsx("div", { style: { flex: 1 }, children: SP_JSX.jsx(StatusBar, { busy: busy, config: config, configOpen: configOpen, onRefresh: () => void refresh(), onToggleConfig: () => setConfigOpen((open) => !open), status: status }) })] }), shouldShowRuntimeCard && (SP_JSX.jsx(RuntimeCard, { busy: busy, onInstall: () => void runInstall(false), onUpdate: () => void runInstall(true), onRefresh: () => void refresh(), status: status })), (!config?.has_api_key || configOpen) && (SP_JSX.jsx(ConfigCard, { busy: busy, config: config, onSaved: (saved) => {
                     setConfig(saved);
                     appendMessage("system", "配置已保存");
                 }, onApiKeySaved: () => setConfigOpen(false) })), permissionRequest && (SP_JSX.jsx(DFL.PanelSection, { title: "\u9700\u8981\u786E\u8BA4", children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: {

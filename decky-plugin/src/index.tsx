@@ -142,6 +142,10 @@ const answerPermission = callable<
   [turnId: string, requestId: string, decision: string],
   BackendResult
 >("answer_permission");
+const resetSession = callable<
+  [messages: Message[]],
+  BackendResult & { remembered?: { key: string; value: string }[] }
+>("reset_session");
 
 const colors = {
   panel: "rgba(20, 23, 28, 0.72)",
@@ -929,12 +933,27 @@ function Content() {
     }
   };
 
-  const clearHistory = () => {
+  const clearHistory = async () => {
+    const currentMessages = messages;
     setMessages(
       status
         ? [{ id: nextId(), role: "assistant", text: welcomeMessageForStatus(status) }]
         : [],
     );
+    setPermissionRequest(null);
+    setActiveTurnId(null);
+    seenEventCountRef.current = 0;
+    try {
+      const result = await resetSession(currentMessages);
+      if (result.remembered && result.remembered.length > 0) {
+        appendMessage(
+          "system",
+          `已开启新对话，并更新 ${result.remembered.length} 条长期偏好记忆。`,
+        );
+      }
+    } catch (error) {
+      appendMessage("system", `新对话已清空界面历史，但后端重置失败：${String(error)}`);
+    }
   };
 
   const canSend = useMemo(
@@ -961,9 +980,9 @@ function Content() {
         <div
           role="button"
           tabIndex={0}
-          onClick={clearHistory}
-          title="清空对话历史"
-          aria-label="清空对话历史"
+          onClick={() => void clearHistory()}
+          title="开启新对话"
+          aria-label="开启新对话"
           style={{
             alignItems: "center",
             background: "rgba(255, 123, 114, 0.09)",
@@ -979,7 +998,7 @@ function Content() {
           }}
         >
           <FaTrash size={11} />
-          清空
+          新对话
         </div>
         <div style={{ flex: 1 }}>
           <StatusBar

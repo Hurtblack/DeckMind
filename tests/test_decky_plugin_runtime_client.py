@@ -228,6 +228,68 @@ class DeckyPluginRuntimeSessionTests(unittest.IsolatedAsyncioTestCase):
             else:
                 os.environ["DEEPSEEK_API_KEY"] = previous_key
 
+    async def test_reset_session_drops_cached_agent_so_next_turn_starts_fresh(self) -> None:
+        config_module = load_plugin_module("config_store.py")
+        client_module = load_plugin_module("runtime_client.py")
+
+        with tempfile.TemporaryDirectory() as root:
+            store = config_module.ConfigStore(path=Path(root) / "config.json")
+            store.save({
+                "provider": "deepseek",
+                "model": "fake-model",
+                "api_key": "sk-test",
+            })
+            runtime_dir = Path(root) / "runtime"
+            runtime_dir.mkdir()
+            (runtime_dir / "main.py").write_text("", encoding="utf-8")
+            created: list[FakeAgent] = []
+
+            async def make_agent(**kwargs: Any) -> FakeAgent:
+                agent = FakeAgent(kwargs["events"])
+                created.append(agent)
+                return agent
+
+            session = client_module.RuntimeSession(
+                runtime_dir=runtime_dir,
+                config_store=store,
+                agent_factory=make_agent,
+            )
+
+            first = await session.ask("第一轮")
+            reset = session.reset_session([])
+            second = await session.ask("第二轮")
+
+        self.assertTrue(first["ok"])
+        self.assertTrue(reset["ok"])
+        self.assertTrue(second["ok"])
+        self.assertEqual(len(created), 2)
+        self.assertEqual(created[0].messages, ["第一轮"])
+        self.assertEqual(created[1].messages, ["第二轮"])
+
+    def test_memory_candidates_are_compact_and_high_confidence(self) -> None:
+        client_module = load_plugin_module("runtime_client.py")
+
+        messages = [
+            {"role": "user", "text": "以后代码改完直接 push 到远端，dev 和 main 保持同步"},
+            {"role": "assistant", "text": "已 push"},
+            {"role": "user", "text": "对，以后这种低风险操作别一直问确认"},
+            {"role": "user", "text": "这个临时想法只是今天试一下，不要长期保存"},
+        ]
+
+        candidates = client_module.summarize_memory_candidates(messages)
+
+        self.assertEqual(candidates, [
+            {
+                "key": "workflow_push_preference",
+                "value": "完成代码改动后直接 push，并保持 main/dev 同步。",
+            },
+            {
+                "key": "confirmation_preference",
+                "value": "低风险或明确请求的操作不要反复确认。",
+            },
+        ])
+        self.assertTrue(all(len(item["value"]) <= 80 for item in candidates))
+
     async def test_turn_waits_for_permission_answer_then_completes(self) -> None:
         config_module = load_plugin_module("config_store.py")
         client_module = load_plugin_module("runtime_client.py")

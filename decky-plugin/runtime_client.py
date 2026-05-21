@@ -7,6 +7,7 @@ import asyncio
 import importlib
 import io
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -32,6 +33,72 @@ API_KEY_ENVS: dict[str, str] = {
 
 
 AgentFactory = Callable[..., Awaitable[Any]]
+PROFILE_FACT_LIMIT = 12
+PROFILE_VALUE_LIMIT = 80
+
+
+def _message_texts(messages: list[dict[str, Any]] | None) -> list[str]:
+    if not messages:
+        return []
+    texts: list[str] = []
+    for item in messages:
+        if not isinstance(item, dict):
+            continue
+        if item.get("role") != "user":
+            continue
+        text = str(item.get("text") or "").strip()
+        if text:
+            texts.append(text)
+    return texts[-50:]
+
+
+def _has_explicit_preference(text: str) -> bool:
+    return bool(re.search(r"(以后|默认|总是|每次|不用|不要|别|直接|保持)", text))
+
+
+def summarize_memory_candidates(
+    messages: list[dict[str, Any]] | None,
+) -> list[dict[str, str]]:
+    """Extract short, high-confidence user preferences from recent UI history.
+
+    This is intentionally conservative: it recognizes repeated workflow
+    preferences and explicit "以后/默认" instructions, not arbitrary summaries.
+    """
+    texts = _message_texts(messages)
+    combined = "\n".join(texts)
+    candidates: list[dict[str, str]] = []
+
+    push_hits = sum(
+        1 for text in texts
+        if re.search(r"(push|推送|远端)", text, re.I)
+    )
+    if (
+        push_hits >= 2
+        or any(
+            _has_explicit_preference(text)
+            and re.search(r"(push|推送|远端)", text, re.I)
+            for text in texts
+        )
+    ):
+        candidates.append({
+            "key": "workflow_push_preference",
+            "value": "完成代码改动后直接 push，并保持 main/dev 同步。",
+        })
+
+    if (
+        re.search(r"(低风险|明确请求|更新|升级|side[-_ ]?effect)", combined, re.I)
+        and re.search(r"(别|不要|不用|不需要|直接).{0,12}(问|确认|打扰)", combined)
+    ):
+        candidates.append({
+            "key": "confirmation_preference",
+            "value": "低风险或明确请求的操作不要反复确认。",
+        })
+
+    return [
+        {"key": item["key"], "value": item["value"][:PROFILE_VALUE_LIMIT]}
+        for item in candidates
+        if len(item["value"]) <= PROFILE_VALUE_LIMIT
+    ]
 
 
 class DenyPermissionProvider:
@@ -104,6 +171,13 @@ class RuntimeSession:
     def _entrypoint(self) -> Path:
         return self.runtime_dir / "main.py"
 
+    def _ensure_runtime_path(self) -> None:
+        runtime_path = str(self.runtime_dir)
+        vendor_path = str(self.runtime_dir / ".vendor")
+        for p in (vendor_path, runtime_path):
+            if Path(p).exists() and p not in sys.path:
+                sys.path.insert(0, p)
+
     def _installed(self) -> bool:
         return self.runtime_dir.exists() and self._entrypoint().exists()
 
@@ -168,11 +242,7 @@ class RuntimeSession:
             )
 
         # 把 runtime 目录 + .vendor (装第三方依赖如 openai) 加到 sys.path
-        runtime_path = str(self.runtime_dir)
-        vendor_path = str(self.runtime_dir / ".vendor")
-        for p in (vendor_path, runtime_path):
-            if Path(p).exists() and p not in sys.path:
-                sys.path.insert(0, p)
+        self._ensure_runtime_path()
 
         runtime_module = importlib.import_module("runtime")
         agent_cls = getattr(runtime_module, "Agent")
@@ -195,6 +265,38 @@ class RuntimeSession:
                 return {"ok": False, "error": "unknown_provider"}
             return {"ok": False, "error": "missing_api_key", "missing_api_key": missing}
         return None
+
+    def reset_session(self, messages: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        """Start a fresh agent session and optionally persist compact preferences."""
+        for turn in self._turns.values():
+            task = turn.get("task")
+            if task is not None and not task.done():
+                task.cancel()
+        self._turns.clear()
+        self._agent = None
+
+        candidates = summarize_memory_candidates(messages)
+        remembered: list[dict[str, str]] = []
+        if candidates and self._installed():
+            try:
+                self._ensure_runtime_path()
+                profile_module = importlib.import_module("runtime.profile")
+                facts = profile_module.load_profile()
+                for item in candidates:
+                    if len(facts) >= PROFILE_FACT_LIMIT and item["key"] not in facts:
+                        continue
+                    facts[item["key"]] = item["value"]
+                    remembered.append(item)
+                profile_module.save_profile(facts)
+            except Exception:
+                remembered = []
+
+        return {
+            "ok": True,
+            "reset": True,
+            "remembered": remembered,
+            "candidate_count": len(candidates),
+        }
 
     async def ask(self, message: str) -> dict[str, Any]:
         text = message.strip()
@@ -275,6 +377,8 @@ class RuntimeSession:
                 # 复用时把当前 turn 的 permission_provider 注入，让 UI 能处理权限请求
                 if hasattr(self._agent, "set_permission_provider"):
                     self._agent.set_permission_provider(permission_provider)
+                elif hasattr(self._agent, "permission_provider"):
+                    self._agent.permission_provider = permission_provider
 
                 async def emit(event: dict[str, Any]) -> None:
                     events.append(event)
