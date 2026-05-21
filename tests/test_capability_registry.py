@@ -23,6 +23,34 @@ class CapabilityRegistryTests(unittest.TestCase):
         self.assertIn("bluetooth.connect", names)
         self.assertIn("bluetooth.disconnect", names)
 
+    def test_builtin_audio_capabilities_are_listed(self) -> None:
+        names = {item["name"] for item in list_capabilities()}
+
+        self.assertIn("audio.get_volume", names)
+        self.assertIn("audio.set_volume", names)
+
+    def test_builtin_steam_capabilities_are_listed(self) -> None:
+        names = {item["name"] for item in list_capabilities()}
+
+        self.assertIn("steam.launch_game", names)
+        self.assertIn("steam.close_game", names)
+
+    def test_existing_tool_capability_metadata(self) -> None:
+        audio_set = get_capability("audio.set_volume")
+        steam_launch = get_capability("steam.launch_game")
+
+        self.assertIsNotNone(audio_set)
+        self.assertIsNotNone(steam_launch)
+        assert audio_set is not None
+        assert steam_launch is not None
+
+        self.assertEqual(audio_set.risk, "side_effect")
+        self.assertTrue(audio_set.confirm_required)
+        self.assertEqual(audio_set.args_schema["required"], ["percent"])
+        self.assertEqual(steam_launch.risk, "side_effect")
+        self.assertTrue(steam_launch.confirm_required)
+        self.assertEqual(steam_launch.args_schema["required"], ["game_name"])
+
     def test_public_metadata_omits_handler(self) -> None:
         capability = get_capability("bluetooth.connect")
 
@@ -106,6 +134,61 @@ class CapabilityToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["devices"], [])
+
+    async def test_audio_get_volume_safe_capability_executes(self) -> None:
+        from unittest.mock import patch
+
+        from tools.capability_tool import run_capability
+
+        async def fake_get_volume() -> dict[str, object]:
+            return {"ok": True, "percent": 42, "backend": "fake"}
+
+        with patch("tools.system_tool.get_volume", fake_get_volume):
+            result = await run_capability("audio.get_volume")
+
+        self.assertEqual(result, {"ok": True, "percent": 42, "backend": "fake"})
+
+    async def test_audio_set_volume_without_confirm_returns_dry_run(self) -> None:
+        from tools.capability_tool import run_capability
+
+        result = await run_capability(
+            "audio.set_volume",
+            {"percent": 35},
+            confirm=False,
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["capability"], "audio.set_volume")
+        self.assertEqual(result["args"], {"percent": 35})
+
+    async def test_steam_launch_game_without_confirm_returns_dry_run(self) -> None:
+        from tools.capability_tool import run_capability
+
+        result = await run_capability(
+            "steam.launch_game",
+            {"game_name": "hades"},
+            confirm=False,
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["capability"], "steam.launch_game")
+        self.assertEqual(result["args"], {"game_name": "hades"})
+
+    async def test_steam_close_game_without_confirm_returns_dry_run(self) -> None:
+        from tools.capability_tool import run_capability
+
+        result = await run_capability(
+            "steam.close_game",
+            {"process_name": "Hades"},
+            confirm=False,
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["capability"], "steam.close_game")
+        self.assertEqual(result["args"], {"process_name": "Hades"})
 
 
 if __name__ == "__main__":
