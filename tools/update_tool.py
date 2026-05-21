@@ -15,6 +15,7 @@ Restricted by design:
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,24 @@ from typing import Any
 _PROJECT_DIR: Path = Path(__file__).resolve().parent.parent
 
 
+def _clean_env() -> dict[str, str]:
+    """Strip the runtime-library vars Decky Loader (a PyInstaller binary)
+    injects into plugin backends.
+
+    Decky unpacks its own bundled libssl/libcrypto to /tmp/_MEI*/ and points
+    LD_LIBRARY_PATH at them. Subprocesses inherit those vars, so a system
+    `git` loads Decky's stale libssl instead of the OS one — its libcurl
+    HTTPS handshake then dies (e.g. `libssl.so.3: version 'OPENSSL_3.x.0'
+    not found`), which surfaces as a `git fetch` failure, not a hang.
+    Dropping these vars makes git use the system libraries again.
+    """
+    env = os.environ.copy()
+    for key in ("LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONHOME",
+                "PYTHONPATH", "_MEIPASS", "_MEIPASS2"):
+        env.pop(key, None)
+    return env
+
+
 async def _git(*args: str) -> tuple[int, str, str]:
     """Run a git command inside the project directory."""
     proc = await asyncio.create_subprocess_exec(
@@ -32,6 +51,7 @@ async def _git(*args: str) -> tuple[int, str, str]:
         cwd=str(_PROJECT_DIR),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=_clean_env(),
     )
     out, err = await proc.communicate()
     return (
@@ -166,6 +186,7 @@ async def apply_update(confirm: bool = False) -> dict[str, Any]:
             cwd=str(_PROJECT_DIR),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=_clean_env(),
         )
         out, err_bytes = await proc.communicate()
         if proc.returncode == 0:
