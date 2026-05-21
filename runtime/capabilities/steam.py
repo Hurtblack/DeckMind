@@ -28,7 +28,7 @@ def capabilities() -> list[Capability]:
                 "required": ["game_name"],
             },
             risk="side_effect",
-            confirm_required=True,
+            confirm_required=False,
             handler=launch_game,
         ),
         Capability(
@@ -40,7 +40,7 @@ def capabilities() -> list[Capability]:
                 "required": ["process_name"],
             },
             risk="side_effect",
-            confirm_required=True,
+            confirm_required=False,
             handler=close_game,
         ),
     ]

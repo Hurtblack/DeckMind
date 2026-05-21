@@ -675,11 +675,12 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
             name="apply_update",
             description=(
                 "Pull the latest code from origin (fast-forward only) and "
-                "run `uv sync`. DESTRUCTIVE — call first with confirm=false "
-                "for a dry-run preview, then with confirm=true after the "
-                "user explicitly approves. Refuses if there are uncommitted "
-                "local changes. The new code only takes effect after the "
-                "user restarts the agent."
+                "run `uv sync`. SIDE-EFFECT — when the user explicitly asks "
+                "to update/upgrade/pull latest, call with confirm=true "
+                "directly. Use confirm=false only when the user asks to check "
+                "or preview updates. Refuses if there are uncommitted local "
+                "changes. The new code only takes effect after the user "
+                "restarts the agent."
             ),
             parameters={
                 "type": "object",
@@ -733,11 +734,12 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
         ToolSpec(
             name="run_capability",
             description=(
-                "Run a registered DeckMind capability by name. For non-safe "
-                "capabilities, call first with confirm=false for preview, then "
-                "again with confirm=true after the user approves. Unknown "
-                "capabilities return unknown_capability and must not be replaced "
-                "with shell commands."
+                "Run a registered DeckMind capability by name. Safe and "
+                "side-effect capabilities execute directly when requested. "
+                "For destructive capabilities, call first with confirm=false "
+                "for preview, then again with confirm=true after the user "
+                "approves. Unknown capabilities return unknown_capability "
+                "and must not be replaced with shell commands."
             ),
             parameters={
                 "type": "object",

@@ -42,7 +42,7 @@ def capabilities() -> list[Capability]:
                 "required": ["percent"],
             },
             risk="side_effect",
-            confirm_required=True,
+            confirm_required=False,
             handler=set_volume,
         ),
     ]

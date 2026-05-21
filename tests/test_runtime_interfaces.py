@@ -23,9 +23,9 @@ class RecordingPermissionProvider:
 
 
 class RuntimeInterfaceTests(unittest.IsolatedAsyncioTestCase):
-    async def test_side_effect_permission_uses_injected_provider_and_emits_events(self) -> None:
+    async def test_side_effect_executes_without_permission_prompt(self) -> None:
         events: list[dict[str, Any]] = []
-        provider = RecordingPermissionProvider("allow")
+        provider = RecordingPermissionProvider("deny")
         calls: list[dict[str, Any]] = []
 
         async def fake_tool(**kwargs: Any) -> dict[str, Any]:
@@ -42,19 +42,15 @@ class RuntimeInterfaceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, {"ok": True, "launched": "Portal"})
         self.assertEqual(calls, [{"game_name": "Portal"}])
-        self.assertEqual(len(provider.requests), 1)
-        self.assertEqual(provider.requests[0].name, "launch_game")
-        self.assertEqual(provider.requests[0].risk, "side_effect")
+        self.assertEqual(provider.requests, [])
         self.assertEqual([event["type"] for event in events], [
-            "permission_request",
-            "permission_result",
             "tool_start",
             "tool_result",
         ])
-        self.assertEqual(events[1]["decision"], "allow")
-        self.assertEqual(events[2]["name"], "launch_game")
+        self.assertEqual(events[0]["name"], "launch_game")
+        self.assertEqual(events[0]["risk"], "side_effect")
 
-    async def test_permission_denial_does_not_execute_tool(self) -> None:
+    async def test_destructive_permission_denial_does_not_execute_tool(self) -> None:
         events: list[dict[str, Any]] = []
         provider = RecordingPermissionProvider("deny")
         calls: list[dict[str, Any]] = []
@@ -69,7 +65,11 @@ class RuntimeInterfaceTests(unittest.IsolatedAsyncioTestCase):
         executor = Executor(permission_provider=provider, event_sink=emit)
 
         with patch("runtime.executor.get_tool", return_value=fake_tool):
-            result = await executor.run("launch_game", {"game_name": "Portal"})
+            result = await executor.run("write_text_file", {
+                "path": "~/Documents/demo.txt",
+                "content": "demo",
+                "confirm": True,
+            })
 
         self.assertFalse(result["ok"])
         self.assertTrue(result["denied"])
@@ -81,8 +81,8 @@ class RuntimeInterfaceTests(unittest.IsolatedAsyncioTestCase):
         ])
         self.assertEqual(events[1]["decision"], "deny")
 
-    async def test_allow_all_decision_reuses_permission_for_same_tool(self) -> None:
-        provider = RecordingPermissionProvider("allow_all")
+    async def test_side_effect_runs_each_time_without_allow_all(self) -> None:
+        provider = RecordingPermissionProvider("deny")
         calls = 0
 
         async def fake_tool(**kwargs: Any) -> dict[str, Any]:
@@ -99,7 +99,24 @@ class RuntimeInterfaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(first["ok"])
         self.assertTrue(second["ok"])
         self.assertEqual(calls, 2)
-        self.assertEqual(len(provider.requests), 1)
+        self.assertEqual(provider.requests, [])
+
+    async def test_apply_update_is_side_effect_without_permission_prompt(self) -> None:
+        provider = RecordingPermissionProvider("deny")
+        calls: list[dict[str, Any]] = []
+
+        async def fake_tool(**kwargs: Any) -> dict[str, Any]:
+            calls.append(kwargs)
+            return {"ok": True, "updated": True}
+
+        executor = Executor(permission_provider=provider)
+
+        with patch("runtime.executor.get_tool", return_value=fake_tool):
+            result = await executor.run("apply_update", {"confirm": True})
+
+        self.assertEqual(result, {"ok": True, "updated": True})
+        self.assertEqual(calls, [{"confirm": True}])
+        self.assertEqual(provider.requests, [])
 
 
 class CapabilityExecutorRiskTests(unittest.IsolatedAsyncioTestCase):
@@ -112,21 +129,48 @@ class CapabilityExecutorRiskTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(provider.requests, [])
 
-    async def test_run_capability_confirm_false_skips_permission(self) -> None:
+    async def test_run_side_effect_capability_default_executes_without_permission(self) -> None:
         provider = RecordingPermissionProvider("allow")
         executor = Executor(permission_provider=provider)
 
-        result = await executor.run(
-            "run_capability",
-            {
-                "name": "bluetooth.connect",
-                "args": {"address": "AA:BB:CC:DD:EE:FF"},
-                "confirm": False,
-            },
-        )
+        async def fake_set_volume(percent: int) -> dict[str, object]:
+            return {"ok": True, "percent": percent, "backend": "fake", "verified": True}
+
+        with patch("tools.system_tool.set_volume", fake_set_volume):
+            result = await executor.run(
+                "run_capability",
+                {
+                    "name": "audio.set_volume",
+                    "args": {"percent": 55},
+                },
+            )
+
+        self.assertEqual(result, {"ok": True, "percent": 55, "backend": "fake", "verified": True})
+        self.assertEqual(provider.requests, [])
+
+    async def test_run_destructive_capability_preview_skips_permission(self) -> None:
+        from runtime.capabilities.registry import register_capability
+        from runtime.capabilities.types import Capability
+
+        async def fake_handler() -> dict[str, object]:
+            return {"ok": True}
+
+        register_capability(Capability(
+            name="test.destructive_preview",
+            description="Test destructive preview",
+            args_schema={"type": "object", "properties": {}},
+            risk="destructive",
+            confirm_required=True,
+            handler=fake_handler,
+        ))
+        provider = RecordingPermissionProvider("deny")
+        executor = Executor(permission_provider=provider)
+
+        result = await executor.run("run_capability", {"name": "test.destructive_preview"})
 
         self.assertTrue(result["ok"])
         self.assertTrue(result["dry_run"])
+        self.assertEqual(result["capability"], "test.destructive_preview")
         self.assertEqual(provider.requests, [])
 
     async def test_run_safe_capability_executes_without_permission(self) -> None:
@@ -142,46 +186,65 @@ class CapabilityExecutorRiskTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"ok": True, "percent": 25, "backend": "fake"})
         self.assertEqual(provider.requests, [])
 
-    async def test_run_side_effect_capability_confirm_true_requests_permission(self) -> None:
+    async def test_run_destructive_capability_confirm_true_requests_permission(self) -> None:
+        from runtime.capabilities.registry import register_capability
+        from runtime.capabilities.types import Capability
+
+        async def fake_handler() -> dict[str, object]:
+            return {"ok": True, "changed": True}
+
+        register_capability(Capability(
+            name="test.destructive_execute",
+            description="Test destructive execute",
+            args_schema={"type": "object", "properties": {}},
+            risk="destructive",
+            confirm_required=True,
+            handler=fake_handler,
+        ))
         provider = RecordingPermissionProvider("allow")
         executor = Executor(permission_provider=provider)
 
-        async def fake_set_volume(percent: int) -> dict[str, object]:
-            return {"ok": True, "percent": percent, "backend": "fake", "verified": True}
-
-        with patch("tools.system_tool.set_volume", fake_set_volume):
-            result = await executor.run(
-                "run_capability",
-                {
-                    "name": "audio.set_volume",
-                    "args": {"percent": 55},
-                    "confirm": True,
-                },
-            )
+        result = await executor.run(
+            "run_capability",
+            {"name": "test.destructive_execute", "confirm": True},
+        )
 
         self.assertTrue(result["ok"])
-        self.assertEqual(result["percent"], 55)
+        self.assertTrue(result["changed"])
         self.assertEqual(len(provider.requests), 1)
         self.assertEqual(provider.requests[0].name, "run_capability")
-        self.assertEqual(provider.requests[0].risk, "side_effect")
+        self.assertEqual(provider.requests[0].risk, "destructive")
 
-    async def test_run_side_effect_capability_confirm_true_denial_skips_execution(self) -> None:
+    async def test_run_destructive_capability_confirm_true_denial_skips_execution(self) -> None:
+        from runtime.capabilities.registry import register_capability
+        from runtime.capabilities.types import Capability
+
+        calls = 0
+
+        async def fake_handler() -> dict[str, object]:
+            nonlocal calls
+            calls += 1
+            return {"ok": True}
+
+        register_capability(Capability(
+            name="test.destructive_denied",
+            description="Test destructive denied",
+            args_schema={"type": "object", "properties": {}},
+            risk="destructive",
+            confirm_required=True,
+            handler=fake_handler,
+        ))
         provider = RecordingPermissionProvider("deny")
         executor = Executor(permission_provider=provider)
 
-        with patch("tools.system_tool.set_volume") as set_volume:
-            result = await executor.run(
-                "run_capability",
-                {
-                    "name": "audio.set_volume",
-                    "args": {"percent": 55},
-                    "confirm": True,
-                },
-            )
+        result = await executor.run(
+            "run_capability",
+            {"name": "test.destructive_denied", "confirm": True},
+        )
 
         self.assertFalse(result["ok"])
         self.assertTrue(result["denied"])
-        set_volume.assert_not_called()
+        self.assertEqual(calls, 0)
         self.assertEqual(len(provider.requests), 1)
 
     async def test_run_unknown_capability_does_not_request_permission(self) -> None:

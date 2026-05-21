@@ -45,10 +45,10 @@ class CapabilityRegistryTests(unittest.TestCase):
         assert steam_launch is not None
 
         self.assertEqual(audio_set.risk, "side_effect")
-        self.assertTrue(audio_set.confirm_required)
+        self.assertFalse(audio_set.confirm_required)
         self.assertEqual(audio_set.args_schema["required"], ["percent"])
         self.assertEqual(steam_launch.risk, "side_effect")
-        self.assertTrue(steam_launch.confirm_required)
+        self.assertFalse(steam_launch.confirm_required)
         self.assertEqual(steam_launch.args_schema["required"], ["game_name"])
 
     def test_public_metadata_omits_handler(self) -> None:
@@ -60,7 +60,7 @@ class CapabilityRegistryTests(unittest.TestCase):
 
         self.assertEqual(public["name"], "bluetooth.connect")
         self.assertEqual(public["risk"], "side_effect")
-        self.assertTrue(public["confirm_required"])
+        self.assertFalse(public["confirm_required"])
         self.assertNotIn("handler", public)
 
     def test_registry_rejects_duplicate_names(self) -> None:
@@ -105,18 +105,18 @@ class CapabilityToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["capability"], "wifi.switch_network")
         self.assertIn("list_capabilities", result["suggestions"])
 
-    async def test_run_side_effect_capability_without_confirm_returns_dry_run(self) -> None:
+    async def test_run_side_effect_capability_without_confirm_executes(self) -> None:
+        from unittest.mock import patch
+
         from tools.capability_tool import run_capability
 
-        result = await run_capability(
-            "bluetooth.connect",
-            {"address": "AA:BB:CC:DD:EE:FF"},
-            confirm=False,
-        )
+        async def fake_set_volume(percent: int) -> dict[str, object]:
+            return {"ok": True, "percent": percent, "backend": "fake", "verified": True}
 
-        self.assertTrue(result["ok"])
-        self.assertTrue(result["dry_run"])
-        self.assertEqual(result["capability"], "bluetooth.connect")
+        with patch("tools.system_tool.set_volume", fake_set_volume):
+            result = await run_capability("audio.set_volume", {"percent": 35})
+
+        self.assertEqual(result, {"ok": True, "percent": 35, "backend": "fake", "verified": True})
 
     async def test_run_safe_capability_executes_without_confirm(self) -> None:
         from unittest.mock import patch
@@ -148,47 +148,44 @@ class CapabilityToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, {"ok": True, "percent": 42, "backend": "fake"})
 
-    async def test_audio_set_volume_without_confirm_returns_dry_run(self) -> None:
+    async def test_audio_set_volume_without_confirm_executes(self) -> None:
+        from unittest.mock import patch
+
         from tools.capability_tool import run_capability
 
-        result = await run_capability(
-            "audio.set_volume",
-            {"percent": 35},
-            confirm=False,
-        )
+        async def fake_set_volume(percent: int) -> dict[str, object]:
+            return {"ok": True, "percent": percent, "backend": "fake", "verified": True}
 
-        self.assertTrue(result["ok"])
-        self.assertTrue(result["dry_run"])
-        self.assertEqual(result["capability"], "audio.set_volume")
-        self.assertEqual(result["args"], {"percent": 35})
+        with patch("tools.system_tool.set_volume", fake_set_volume):
+            result = await run_capability("audio.set_volume", {"percent": 35})
 
-    async def test_steam_launch_game_without_confirm_returns_dry_run(self) -> None:
+        self.assertEqual(result, {"ok": True, "percent": 35, "backend": "fake", "verified": True})
+
+    async def test_steam_launch_game_without_confirm_executes(self) -> None:
+        from unittest.mock import patch
+
         from tools.capability_tool import run_capability
 
-        result = await run_capability(
-            "steam.launch_game",
-            {"game_name": "hades"},
-            confirm=False,
-        )
+        async def fake_launch_game(game_name: str) -> dict[str, object]:
+            return {"ok": True, "game": game_name, "mock": True}
 
-        self.assertTrue(result["ok"])
-        self.assertTrue(result["dry_run"])
-        self.assertEqual(result["capability"], "steam.launch_game")
-        self.assertEqual(result["args"], {"game_name": "hades"})
+        with patch("tools.steam_tool.launch_game", fake_launch_game):
+            result = await run_capability("steam.launch_game", {"game_name": "hades"})
 
-    async def test_steam_close_game_without_confirm_returns_dry_run(self) -> None:
+        self.assertEqual(result, {"ok": True, "game": "hades", "mock": True})
+
+    async def test_steam_close_game_without_confirm_executes(self) -> None:
+        from unittest.mock import patch
+
         from tools.capability_tool import run_capability
 
-        result = await run_capability(
-            "steam.close_game",
-            {"process_name": "Hades"},
-            confirm=False,
-        )
+        async def fake_close_game(process_name: str) -> dict[str, object]:
+            return {"ok": True, "closed": process_name}
 
-        self.assertTrue(result["ok"])
-        self.assertTrue(result["dry_run"])
-        self.assertEqual(result["capability"], "steam.close_game")
-        self.assertEqual(result["args"], {"process_name": "Hades"})
+        with patch("tools.steam_tool.close_game", fake_close_game):
+            result = await run_capability("steam.close_game", {"process_name": "Hades"})
+
+        self.assertEqual(result, {"ok": True, "closed": "Hades"})
 
 
 if __name__ == "__main__":

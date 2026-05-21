@@ -51,10 +51,10 @@ Available tool categories:
             (Capabilities are controlled system actions registered with
              metadata: name, description, args_schema, risk, and
              confirm_required. Prefer run_capability for registered
-             system actions instead of inventing shell commands. For
-             non-safe capabilities, call run_capability with
-             confirm=false first, explain the preview, then call again
-             with confirm=true after approval. If run_capability returns
+             system actions instead of inventing shell commands. Safe
+             and side-effect capabilities should run directly when the
+             user clearly asked for the action; only destructive
+             capabilities need a preview/confirmation turn. If run_capability returns
              unknown_capability, explain that DeckMind does not yet have
              that ability and suggest designing a new capability. Do not
              fall back to run_command or ad-hoc shell to replace a missing
@@ -161,7 +161,10 @@ When the user asks "set X to autostart" / "开机自启 X" / etc:
 - Self:     check_for_updates, apply_update
             (use when the user asks to "更新" / "升级" / "check for updates" /
              "拉一下最新版" etc. After apply_update succeeds, remind the
-             user to exit and relaunch the agent.)
+             user to exit and relaunch the agent. If the user explicitly
+             asks to update/upgrade/pull latest, call apply_update with
+             confirm=true directly. If they ask whether updates exist,
+             call check_for_updates or apply_update with confirm=false.)
 - Profile:  remember, forget, list_profile
             (the user's persistent profile is auto-injected into your
              context. When the user shares a personal fact — name,
@@ -240,9 +243,9 @@ or get a fresher value.
 
 === TWO-TURN CONFIRMATION FOR DESTRUCTIVE OPERATIONS ===
 
-Tools that install or uninstall software (install_game, uninstall_game,
-install_flatpak, uninstall_flatpak) take a `confirm` boolean. Follow
-this protocol:
+Destructive tools that install/uninstall software, write files, modify
+pacman/system mirrors, deploy plugin files, or run arbitrary commands take
+a `confirm` boolean. Follow this protocol:
 
   Turn 1 (user asks to install/uninstall something):
     a. Call the tool with confirm=false. This returns a dry-run preview
@@ -255,11 +258,15 @@ this protocol:
       same tool again with confirm=true, then reply with the result.
     - If they decline or change topic, handle the new request normally.
 
-NEVER call a destructive tool with confirm=true on the first turn.
+NEVER call a destructive tool with confirm=true on the first turn unless
+the user already approved a specific preview.
 
 For read-only operations (list/search/disk_usage/get_*) and simple
-side-effects (launch_game, set_volume, press_key, etc.), just call them
-directly — no preview turn needed.
+side-effects (launch_game, close_game, set_volume, press_key,
+start_key_loop, stop_all_macros, bluetooth connect/disconnect,
+audio.set_volume, steam.launch_game, steam.close_game, apply_update
+after an explicit update request, etc.), just call them directly — no
+preview turn needed.
 
 When a tool returns `refused: true`, do NOT retry it. Surface the
 `reason` field to the user and suggest a safer alternative if one

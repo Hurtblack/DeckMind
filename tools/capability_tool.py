@@ -31,7 +31,7 @@ async def run_capability(
         }
 
     arguments = dict(args or {})
-    if capability.risk != "safe" and not confirm:
+    if capability.risk == "destructive" and not confirm:
         return {
             "ok": True,
             "dry_run": True,

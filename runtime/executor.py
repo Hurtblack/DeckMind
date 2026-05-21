@@ -9,8 +9,8 @@ clear `reason` so the LLM can explain why to the user.
 Three risk classes here in the Executor:
 
   - safe         : read-only ops. Pass through silently.
-  - side_effect  : ask [y/n/a] before each call.
-                   `a` = allow this tool for the rest of the session.
+  - side_effect  : low-risk state changes. Execute without prompting when
+                   the user clearly requested the action.
   - destructive  : confirm=false is a free preview (dry-run);
                    confirm=true triggers a [y/n] prompt before running.
 
@@ -69,6 +69,7 @@ RISK_SAFE: set[str] = {
 }
 
 RISK_SIDE_EFFECT: set[str] = {
+    "apply_update",
     "set_volume",
     "press_key",
     "start_key_loop",
@@ -91,7 +92,6 @@ RISK_DESTRUCTIVE: set[str] = {
     "uninstall_game",
     "install_flatpak",
     "uninstall_flatpak",
-    "apply_update",
     # Writes a file inside the user's home — same dry-run/confirm gate
     # as the install/uninstall tools.
     "write_text_file",
@@ -203,25 +203,7 @@ class Executor:
             pass  # read-only — no prompt
 
         elif risk == "side_effect":
-            if name == "run_capability" and not bool(arguments.get("confirm", False)):
-                pass
-            elif name not in self._allow_all:
-                decision = await self._request_permission(
-                    name=name,
-                    arguments=arguments,
-                    risk=risk,
-                    message=(
-                        f"    ⚠ side-effect: {name}({arguments})  "
-                        f"[y=允许 / n=拒绝 / a=本会话此工具全允许] > "
-                    ),
-                )
-                if decision == "allow_all":
-                    self._allow_all.add(name)
-                elif decision != "allow":
-                    result = {"ok": False, "denied": True,
-                              "reason": f"user rejected side-effect call to {name}"}
-                    await self._emit({"type": "tool_result", "name": name, "result": result})
-                    return result
+            pass  # low-risk state change — no prompt
 
         elif risk == "destructive":
             confirm = bool(arguments.get("confirm", False))

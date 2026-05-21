@@ -231,7 +231,7 @@ def capabilities() -> list[Capability]:
             description="Connect a Bluetooth device by MAC address.",
             args_schema=address_schema,
             risk="side_effect",
-            confirm_required=True,
+            confirm_required=False,
             handler=connect,
         ),
         Capability(
@@ -239,7 +239,7 @@ def capabilities() -> list[Capability]:
             description="Disconnect a Bluetooth device by MAC address.",
             args_schema=address_schema,
             risk="side_effect",
-            confirm_required=True,
+            confirm_required=False,
             handler=disconnect,
         ),
     ]
