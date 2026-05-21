@@ -100,7 +100,6 @@ RISK_DESTRUCTIVE: set[str] = {
     "set_pacman_mirror_china",
     # Restricted command runner — still executes local user-level commands.
     "run_command",
-    "run_capability",
     # Replaces the Decky plugin directory under ~/homebrew/plugins.
     "install_decky_plugin",
 }
@@ -114,6 +113,20 @@ def _risk_of(name: str) -> str:
     if name in RISK_DESTRUCTIVE:
         return "destructive"
     return "destructive"
+
+
+def _capability_risk(arguments: dict[str, Any]) -> str:
+    """Return risk for run_capability using target capability metadata."""
+    name = arguments.get("name")
+    if not isinstance(name, str):
+        return "safe"
+
+    from runtime.capabilities.registry import get_capability
+
+    capability = get_capability(name)
+    if capability is None:
+        return "safe"
+    return capability.risk
 
 
 # ---------- the executor ----------
@@ -172,6 +185,8 @@ class Executor:
             return {"ok": False, "error": f"unknown tool '{name}'"}
 
         risk = _risk_of(name)
+        if name == "run_capability":
+            risk = _capability_risk(arguments)
 
         # run_command is destructive by default, but a call that only
         # reads state (cat / ls / grep / wc / sed -n / ...) is harmless;
@@ -188,7 +203,9 @@ class Executor:
             pass  # read-only — no prompt
 
         elif risk == "side_effect":
-            if name not in self._allow_all:
+            if name == "run_capability" and not bool(arguments.get("confirm", False)):
+                pass
+            elif name not in self._allow_all:
                 decision = await self._request_permission(
                     name=name,
                     arguments=arguments,
