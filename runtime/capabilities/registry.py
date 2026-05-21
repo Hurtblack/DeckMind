@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from . import bluetooth
+from . import audio, bluetooth, steam
 from .types import Capability
 
 
@@ -30,8 +30,9 @@ class CapabilityRegistry:
 
 _REGISTRY = CapabilityRegistry()
 
-for capability in bluetooth.capabilities():
-    _REGISTRY.register(capability)
+for module in (bluetooth, audio, steam):
+    for capability in module.capabilities():
+        _REGISTRY.register(capability)
 
 
 def register_capability(capability: Capability) -> None:
