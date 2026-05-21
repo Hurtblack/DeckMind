@@ -37,6 +37,7 @@ from .interfaces import (
 RISK_SAFE: set[str] = {
     "get_battery",
     "get_volume",
+    "list_capabilities",
     "list_running_games",
     "list_flatpak_apps",
     "search_flatpak",
@@ -99,6 +100,7 @@ RISK_DESTRUCTIVE: set[str] = {
     "set_pacman_mirror_china",
     # Restricted command runner — still executes local user-level commands.
     "run_command",
+    "run_capability",
     # Replaces the Decky plugin directory under ~/homebrew/plugins.
     "install_decky_plugin",
 }

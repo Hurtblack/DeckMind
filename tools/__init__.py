@@ -15,8 +15,8 @@ from typing import Any, Awaitable, Callable
 from llm.base import ToolSpec
 
 from . import (
-    command_tool, decky_plugin_tool, file_tool, file_write_tool, macro_tool, notion_tool,
-    package_tool, pacman_tool, profile_tool, steam_tool,
+    capability_tool, command_tool, decky_plugin_tool, file_tool, file_write_tool,
+    macro_tool, notion_tool, package_tool, pacman_tool, profile_tool, steam_tool,
     steamos_lock as steamos_lock_tool, system_tool, update_tool,
 )
 
@@ -714,6 +714,42 @@ TOOLS: dict[str, tuple[ToolFn, ToolSpec]] = {
                 "type": "object",
                 "properties": {"percent": {"type": "integer", "minimum": 0, "maximum": 100}},
                 "required": ["percent"],
+            },
+        ),
+    ),
+    "list_capabilities": (
+        capability_tool.list_capabilities,
+        ToolSpec(
+            name="list_capabilities",
+            description=(
+                "List registered DeckMind capabilities with descriptions, "
+                "argument schemas, risk levels, and confirmation requirements."
+            ),
+            parameters={"type": "object", "properties": {}},
+        ),
+    ),
+    "run_capability": (
+        capability_tool.run_capability,
+        ToolSpec(
+            name="run_capability",
+            description=(
+                "Run a registered DeckMind capability by name. For non-safe "
+                "capabilities, call first with confirm=false for preview, then "
+                "again with confirm=true after the user approves. Unknown "
+                "capabilities return unknown_capability and must not be replaced "
+                "with shell commands."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "args": {
+                        "type": "object",
+                        "description": "Capability arguments matching its args_schema.",
+                    },
+                    "confirm": {"type": "boolean", "default": False},
+                },
+                "required": ["name"],
             },
         ),
     ),

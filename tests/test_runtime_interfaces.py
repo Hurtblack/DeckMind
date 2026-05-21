@@ -102,6 +102,34 @@ class RuntimeInterfaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(provider.requests), 1)
 
 
+class CapabilityExecutorRiskTests(unittest.IsolatedAsyncioTestCase):
+    async def test_list_capabilities_is_safe(self) -> None:
+        provider = RecordingPermissionProvider("deny")
+        executor = Executor(permission_provider=provider)
+
+        result = await executor.run("list_capabilities", {})
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(provider.requests, [])
+
+    async def test_run_capability_confirm_false_skips_permission(self) -> None:
+        provider = RecordingPermissionProvider("allow")
+        executor = Executor(permission_provider=provider)
+
+        result = await executor.run(
+            "run_capability",
+            {
+                "name": "bluetooth.connect",
+                "args": {"address": "AA:BB:CC:DD:EE:FF"},
+                "confirm": False,
+            },
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(provider.requests, [])
+
+
 class AgentInterfaceWiringTests(unittest.IsolatedAsyncioTestCase):
     async def test_agent_passes_runtime_interfaces_to_executor(self) -> None:
         provider = object()
