@@ -20,6 +20,7 @@ from typing import Any
 GIT_TIMEOUT = 120  # 秒，单次 git 操作超时
 GIT_RETRIES = 4  # git 网络错误重试次数（Deck 访问 GitHub 不稳定）
 PIP_TIMEOUT = 300  # 秒，pip install 超时（首次装 openai 等较慢）
+PYTHON_PROBE_TIMEOUT = 3  # 秒，探测系统 Python 不应让 GUI 长时间无输出
 VENDOR_DIR_NAME = ".vendor"  # runtime 内放第三方依赖的子目录
 
 
@@ -296,7 +297,7 @@ class RuntimeInstaller:
                  "import sys; print(f'{sys.version_info[0]} {sys.version_info[1]}')"],
                 capture_output=True,
                 text=True,
-                timeout=10,
+                timeout=PYTHON_PROBE_TIMEOUT,
                 env=self._clean_env(),
             )
         except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -317,15 +318,31 @@ class RuntimeInstaller:
             f"/usr/local/bin/python{major}.{minor}",
             f"python{major}.{minor}",
         ):
-            if self._probe_python(candidate) == target:
+            self._emit("deps.python_probe", "try", f"探测 {candidate}")
+            probed = self._probe_python(candidate)
+            if probed == target:
+                self._emit(
+                    "deps.python_probe",
+                    "ok",
+                    f"找到 {candidate} (Python {major}.{minor})",
+                )
                 return candidate
+            self._emit("deps.python_probe", "skip", f"{candidate} 不可用")
         return None
 
     def _find_system_python(self) -> str | None:
         """找任意一个可用的系统 Python（用于 pip 跨版本下载）。"""
         for candidate in ("/usr/bin/python3", "/usr/bin/python", "python3", "python"):
-            if self._probe_python(candidate) is not None:
+            self._emit("deps.python_probe", "try", f"探测 {candidate}")
+            probed = self._probe_python(candidate)
+            if probed is not None:
+                self._emit(
+                    "deps.python_probe",
+                    "ok",
+                    f"找到 {candidate} (Python {probed[0]}.{probed[1]})",
+                )
                 return candidate
+            self._emit("deps.python_probe", "skip", f"{candidate} 不可用")
         return None
 
     def _pip_install_to_vendor(

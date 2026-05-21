@@ -172,6 +172,38 @@ class DeckyPluginInstallerTests(unittest.TestCase):
         self.assertIn("--platform manylinux2014_x86_64", result["error"])
         self.assertNotIn("--abi", result["error"])
 
+    def test_find_system_python_emits_probe_progress(self) -> None:
+        module = load_installer_module()
+        with tempfile.TemporaryDirectory() as root:
+            installer = module.RuntimeInstaller(
+                runtime_dir=Path(root) / "runtime",
+                cache_dir=Path(root) / "cache",
+            )
+
+            with patch.object(
+                installer,
+                "_probe_python",
+                side_effect=[None, (3, 13)],
+            ):
+                found = installer._find_system_python()
+
+            progress = installer.get_progress(0)["events"]
+
+        self.assertEqual(found, "/usr/bin/python")
+        probe_messages = [
+            event["message"]
+            for event in progress
+            if event["stage"] == "deps.python_probe"
+        ]
+        self.assertIn("探测 /usr/bin/python3", probe_messages)
+        self.assertIn("探测 /usr/bin/python", probe_messages)
+        self.assertIn("找到 /usr/bin/python (Python 3.13)", probe_messages)
+
+    def test_python_probe_timeout_is_short(self) -> None:
+        module = load_installer_module()
+
+        self.assertLessEqual(module.PYTHON_PROBE_TIMEOUT, 3)
+
 
 if __name__ == "__main__":
     unittest.main()
