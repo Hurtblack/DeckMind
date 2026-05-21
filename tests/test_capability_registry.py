@@ -57,5 +57,56 @@ class CapabilityRegistryTests(unittest.TestCase):
         self.assertIsNone(registry.get("missing.capability"))
 
 
+class CapabilityToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_list_capabilities_tool_returns_public_metadata(self) -> None:
+        from tools.capability_tool import list_capabilities as list_tool
+
+        result = await list_tool()
+
+        self.assertTrue(result["ok"])
+        names = {item["name"] for item in result["capabilities"]}
+        self.assertIn("bluetooth.get_devices", names)
+
+    async def test_run_capability_unknown_returns_structured_error(self) -> None:
+        from tools.capability_tool import run_capability
+
+        result = await run_capability("wifi.switch_network")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "unknown_capability")
+        self.assertEqual(result["capability"], "wifi.switch_network")
+        self.assertIn("list_capabilities", result["suggestions"])
+
+    async def test_run_side_effect_capability_without_confirm_returns_dry_run(self) -> None:
+        from tools.capability_tool import run_capability
+
+        result = await run_capability(
+            "bluetooth.connect",
+            {"address": "AA:BB:CC:DD:EE:FF"},
+            confirm=False,
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["capability"], "bluetooth.connect")
+
+    async def test_run_safe_capability_executes_without_confirm(self) -> None:
+        from unittest.mock import patch
+
+        from runtime.capabilities.bluetooth import CommandResult
+        from tools.capability_tool import run_capability
+
+        async def runner(args: list[str]) -> CommandResult:
+            if args == ["devices"]:
+                return CommandResult(0, "", "")
+            raise AssertionError(f"unexpected call: {args}")
+
+        with patch("runtime.capabilities.bluetooth._run_bluetoothctl", runner):
+            result = await run_capability("bluetooth.get_devices")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["devices"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
