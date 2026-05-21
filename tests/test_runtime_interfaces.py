@@ -129,6 +129,74 @@ class CapabilityExecutorRiskTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["dry_run"])
         self.assertEqual(provider.requests, [])
 
+    async def test_run_safe_capability_executes_without_permission(self) -> None:
+        provider = RecordingPermissionProvider("deny")
+        executor = Executor(permission_provider=provider)
+
+        async def fake_get_volume() -> dict[str, object]:
+            return {"ok": True, "percent": 25, "backend": "fake"}
+
+        with patch("tools.system_tool.get_volume", fake_get_volume):
+            result = await executor.run("run_capability", {"name": "audio.get_volume"})
+
+        self.assertEqual(result, {"ok": True, "percent": 25, "backend": "fake"})
+        self.assertEqual(provider.requests, [])
+
+    async def test_run_side_effect_capability_confirm_true_requests_permission(self) -> None:
+        provider = RecordingPermissionProvider("allow")
+        executor = Executor(permission_provider=provider)
+
+        async def fake_set_volume(percent: int) -> dict[str, object]:
+            return {"ok": True, "percent": percent, "backend": "fake", "verified": True}
+
+        with patch("tools.system_tool.set_volume", fake_set_volume):
+            result = await executor.run(
+                "run_capability",
+                {
+                    "name": "audio.set_volume",
+                    "args": {"percent": 55},
+                    "confirm": True,
+                },
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["percent"], 55)
+        self.assertEqual(len(provider.requests), 1)
+        self.assertEqual(provider.requests[0].name, "run_capability")
+        self.assertEqual(provider.requests[0].risk, "side_effect")
+
+    async def test_run_side_effect_capability_confirm_true_denial_skips_execution(self) -> None:
+        provider = RecordingPermissionProvider("deny")
+        executor = Executor(permission_provider=provider)
+
+        with patch("tools.system_tool.set_volume") as set_volume:
+            result = await executor.run(
+                "run_capability",
+                {
+                    "name": "audio.set_volume",
+                    "args": {"percent": 55},
+                    "confirm": True,
+                },
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["denied"])
+        set_volume.assert_not_called()
+        self.assertEqual(len(provider.requests), 1)
+
+    async def test_run_unknown_capability_does_not_request_permission(self) -> None:
+        provider = RecordingPermissionProvider("deny")
+        executor = Executor(permission_provider=provider)
+
+        result = await executor.run(
+            "run_capability",
+            {"name": "wifi.switch_network", "confirm": True},
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "unknown_capability")
+        self.assertEqual(provider.requests, [])
+
 
 class AgentInterfaceWiringTests(unittest.IsolatedAsyncioTestCase):
     async def test_agent_passes_runtime_interfaces_to_executor(self) -> None:
