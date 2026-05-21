@@ -322,20 +322,27 @@ function runFrontendAction(action: FrontendAction): string {
 
   try {
     if (action.type === "run_game") {
-      // 首选 SteamClient.URL.ExecuteSteamURL：在 Steam 前端**内部**执行 steam://，
-      // 不弹外部确认框，且比 Apps.RunGame 在各 Steam 版本间更稳定——后者在部分
-      // 构建上抛 "Unknown method"。
+      // 首选 SteamClient.Apps.LaunchApp：这是其他 Decky 插件（NonSteamLaunchers
+      // 等）在 Game Mode 下成功启动游戏的标准方式，直接传 Steam AppID 数字。
+      const launch = client.Apps?.LaunchApp as
+        | ((appId: number) => void)
+        | undefined;
+      if (typeof launch === "function") {
+        launch(Number(appId));
+        return `▶ 已通过 Steam 启动「${label}」（appid ${appId}）`;
+      }
+      // 回退 1：ExecuteSteamURL 在 Steam 前端内部执行 steam:// URI，无确认弹窗。
       const exec = client.URL?.ExecuteSteamURL;
       if (typeof exec === "function") {
         exec(`steam://rungameid/${gameId}`);
         return `▶ 已通过 Steam 启动「${label}」（appid ${appId}）`;
       }
-      // 回退：直接调 Apps.RunGame。launchSource=100 即 LibraryDetails。
+      // 回退 2：Apps.RunGame。launchSource=100 即 LibraryDetails。
       const run = client.Apps?.RunGame as
         | ((g: string, s: string, a: number, b: number) => void)
         | undefined;
       if (!run) {
-        return "✗ SteamClient.URL.ExecuteSteamURL 与 Apps.RunGame 均不可用";
+        return "✗ SteamClient.Apps.LaunchApp / ExecuteSteamURL / RunGame 均不可用";
       }
       run(gameId, "", -1, 100);
       return `▶ 已通过 Steam 启动「${label}」（appid ${appId}）`;
